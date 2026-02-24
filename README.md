@@ -38,27 +38,32 @@ npm start
 
 API runs at [http://localhost:3000](http://localhost:3000). The frontend proxies `/api` to this URL.
 
-## Scripts
-
-| Command         | Description              |
-|-----------------|--------------------------|
-| `npm run dev`   | Start with tsx watch     |
-| `npm run build` | Compile TypeScript       |
-| `npm start`     | Run compiled `dist/`     |
-| `npm run lint`  | Run ESLint               |
-
 ## API (current)
 
-| Method | Path               | Description        |
-|--------|--------------------|--------------------|
-| GET    | `/api/health`      | Health check       |
-| GET    | `/api/trust/:address` | Trust score (stub) |
-| GET    | `/api/bond/:address`   | Bond status (stub) |
+| Method | Path                    | Description                     |
+|--------|-------------------------|---------------------------------|
+| GET    | `/api/health`           | Health check                    |
+| GET    | `/api/trust/:address`   | Trust score from reputation engine |
+| GET    | `/api/bond/:address`    | Bond status (stub)              |
+
+See [docs/api.md](docs/api.md) for full request/response documentation.
+
+## Scripts
+
+| Command              | Description                    |
+|----------------------|--------------------------------|
+| `npm run dev`        | Start with tsx watch           |
+| `npm run build`      | Compile TypeScript             |
+| `npm start`          | Run compiled `dist/`           |
+| `npm run lint`       | Run ESLint                     |
+| `npm test`           | Run test suite (vitest)        |
+| `npm run test:watch` | Run tests in watch mode        |
 
 ## Tech
 
 - Node.js
 - TypeScript
 - Express
+- Vitest + Supertest (tests)
 
 Extend with PostgreSQL, Redis, and Horizon event ingestion when implementing the full architecture.
