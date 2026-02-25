@@ -13,6 +13,7 @@ export default defineConfig({
         'src/**/*.test.ts',
         'src/**/__tests__/**',
         'src/index.ts', // App entry; health logic is tested via routes/services
+        'src/**/index.ts', // Re-export files
       ],
       thresholds: {
         statements: 95,
