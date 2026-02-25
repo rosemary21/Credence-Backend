@@ -109,8 +109,14 @@ app.get('/api/bond/:address', requireApiKey(), (req, res) => {
   })
 })
 
-// ─────────────────────────────────────────────────────────────────────────────
+// Bulk verification endpoint (Enterprise)
+app.use('/api/bulk', bulkRouter)
 
-app.listen(PORT, () => {
-  console.log(`Credence API listening on http://localhost:${PORT}`)
-})
+// Only start server if not in test environment
+if (process.env.NODE_ENV !== 'test') {
+  app.listen(PORT, () => {
+    console.log(`Credence API listening on http://localhost:${PORT}`)
+  })
+}
+
+export default app
