@@ -1,4 +1,5 @@
 import express from 'express'
+import { cache } from './cache/redis.js'
 import { generateApiKey, revokeApiKey, rotateApiKey, listApiKeys } from './services/apiKeys.js'
 import { requireApiKey } from './middleware/apiKey.js'
 import {
@@ -26,6 +27,15 @@ app.get('/api/health', (_req, res) => {
 })
 const healthProbes = createDefaultProbes()
 app.use('/api/health', createHealthRouter(healthProbes))
+
+app.get('/api/health/cache', async (_req, res) => {
+  const cacheHealth = await cache.healthCheck()
+  res.json({
+    status: 'ok',
+    service: 'credence-backend',
+    cache: cacheHealth
+  })
+})
 
 // ── API Key Management ────────────────────────────────────────────────────────
 

@@ -14,12 +14,15 @@ This service is part of [Credence](../README.md). It will support:
 
 - Node.js 18+
 - npm or pnpm
+- Redis server (for caching)
 - Docker & Docker Compose (for containerised dev)
 
 ## Setup
 
 ```bash
 npm install
+# Set Redis URL in environment
+export REDIS_URL=redis://localhost:6379
 cp .env.example .env
 # Edit .env with your actual values
 ```
@@ -151,6 +154,14 @@ All configuration is driven by environment variables. Copy `.env.example` to `.e
 
 ## API (current)
 
+| Method | Path               | Description        |
+|--------|--------------------|--------------------|
+| GET    | `/api/health`      | Health check       |
+| GET    | `/api/health/cache` | Redis cache health check |
+| GET    | `/api/trust/:address` | Trust score (stub) |
+| GET    | `/api/bond/:address`   | Bond status (stub) |
+| Method | Path                    | Description            |
+|--------|-------------------------|------------------------|
 | Method | Path                         | Description              |
 |--------|------------------------------|---------------------------|
 | GET    | `/api/health`           | Health check           |
@@ -228,6 +239,17 @@ State shape is `IdentityState`: `address`, `bondedAmount`, `bondStart`, `bondDur
 
 Tests cover: no drift (no update), single drift (one address corrected), full resync (multiple drifts), chain missing, store-only addresses, and error handling.
 
+## Caching
+
+The service includes a Redis-based caching layer with:
+
+- **Connection management** - Singleton Redis client with health monitoring
+- **Namespacing** - Automatic key namespacing (e.g., `trust:score:0x123`)
+- **TTL support** - Set expiration times on cached values
+- **Health checks** - Built-in Redis health monitoring
+- **Graceful fallback** - Continues working when Redis is unavailable
+
+See [docs/caching.md](./docs/caching.md) for detailed documentation.
 ## Developer SDK
 
 A TypeScript/JavaScript SDK is available at `src/sdk/` for programmatic access to the API. See [docs/sdk.md](docs/sdk.md) for full documentation.
@@ -286,6 +308,8 @@ try {
 - Node.js
 - TypeScript
 - Express
+- Redis (caching layer)
+- Vitest (testing)
 - Zod (env validation)
 - dotenv (.env file support)
 - Vitest (testing)
@@ -296,4 +320,4 @@ try {
 - Integration notes: `docs/stellar-integration.md`
 - Tests: `src/clients/soroban.test.ts`
 
-Extend with PostgreSQL, Redis, and Horizon event ingestion when implementing the full architecture.
+Extend with PostgreSQL and Horizon event ingestion when implementing the full architecture.
