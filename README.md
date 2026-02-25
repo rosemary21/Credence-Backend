@@ -50,7 +50,7 @@ API runs at [http://localhost:3000](http://localhost:3000). The frontend proxies
 ## API (current)
 
 | Method | Path               | Description        |
-|--------|--------------------|--------------------| 
+|--------|--------------------|--------------------|
 | GET    | `/api/health`      | Health check       |
 | GET    | `/api/trust/:address` | Trust score (stub) |
 | GET    | `/api/bond/:address`   | Bond status (stub) |
