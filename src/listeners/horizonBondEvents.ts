@@ -16,23 +16,35 @@ const server = new Server(HORIZON_URL);
  */
 export function subscribeBondCreationEvents(onEvent) {
   // Example: Listen to operations of type 'create_bond' (custom event)
-  server.operations()
-    .forAsset('BOND') // Replace with actual asset code if needed
-    .cursor('now')
-    .stream({
-      onmessage: async (op) => {
-        if (op.type === 'create_bond') {
-          const event = parseBondEvent(op);
-          await upsertIdentity(event.identity);
-          await upsertBond(event.bond);
-          if (onEvent) onEvent(event);
+  let cursor = 'now';
+  let stream;
+  const startStream = () => {
+    stream = server.operations()
+      .forAsset('BOND') // Replace with actual asset code if needed
+      .cursor(cursor)
+      .stream({
+        onmessage: async (op) => {
+          cursor = op.paging_token;
+          if (op.type === 'create_bond') {
+            const event = parseBondEvent(op);
+            await upsertIdentity(event.identity);
+            await upsertBond(event.bond);
+            if (onEvent) onEvent(event);
+          }
+        },
+        onerror: (err) => {
+          console.error('Horizon stream error:', err);
+          setTimeout(() => {
+            startStream(); // Reconnect after delay
+          }, 5000);
         }
-      },
-      onerror: (err) => {
-        // TODO: Add reconnection/backfill logic
-        console.error('Horizon stream error:', err);
-      }
-    });
+      });
+  };
+  startStream();
+
+  // Backfill logic: fetch missed events if needed
+  // Example: fetch operations since last cursor
+  // (Implement as needed based on DB state)
 }
 
 /**
