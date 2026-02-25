@@ -14,11 +14,14 @@ This service is part of [Credence](../README.md). It will support:
 
 - Node.js 18+
 - npm or pnpm
+- Redis server (for caching)
 
 ## Setup
 
 ```bash
 npm install
+# Set Redis URL in environment
+export REDIS_URL=redis://localhost:6379
 ```
 
 ## Run locally
@@ -52,13 +55,28 @@ API runs at [http://localhost:3000](http://localhost:3000). The frontend proxies
 | Method | Path               | Description        |
 |--------|--------------------|--------------------|
 | GET    | `/api/health`      | Health check       |
+| GET    | `/api/health/cache` | Redis cache health check |
 | GET    | `/api/trust/:address` | Trust score (stub) |
 | GET    | `/api/bond/:address`   | Bond status (stub) |
+
+## Caching
+
+The service includes a Redis-based caching layer with:
+
+- **Connection management** - Singleton Redis client with health monitoring
+- **Namespacing** - Automatic key namespacing (e.g., `trust:score:0x123`)
+- **TTL support** - Set expiration times on cached values
+- **Health checks** - Built-in Redis health monitoring
+- **Graceful fallback** - Continues working when Redis is unavailable
+
+See [docs/caching.md](./docs/caching.md) for detailed documentation.
 
 ## Tech
 
 - Node.js
 - TypeScript
 - Express
+- Redis (caching layer)
+- Vitest (testing)
 
-Extend with PostgreSQL, Redis, and Horizon event ingestion when implementing the full architecture.
+Extend with PostgreSQL and Horizon event ingestion when implementing the full architecture.
