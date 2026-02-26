@@ -37,6 +37,12 @@ const seeds: Identity[] = [
     bondStart: null,
     attestationCount: 0,
   },
+  {
+    address: '0x742d35cc6634c0532925a3b844bc454e4438f44e',
+    bondedAmount: '0',
+    bondStart: null,
+    attestationCount: 0,
+  },
 ]
 
 for (const seed of seeds) {

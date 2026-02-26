@@ -30,32 +30,29 @@
 import { Router, type Request, type Response } from 'express'
 import { getTrustScore } from '../services/reputationService.js'
 import { apiKeyMiddleware } from '../middleware/apiKey.js'
+import { validate } from '../middleware/validate.js'
+import { trustPathParamsSchema } from '../schemas/index.js'
 
 const router = Router()
 
-/** EIP-55 / raw Ethereum address: 0x followed by exactly 40 hex characters. */
-const ETH_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/
+router.get(
+  '/:address',
+  validate({ params: trustPathParamsSchema }),
+  apiKeyMiddleware,
+  (req: Request, res: Response) => {
+    const { address } = req.validated!.params! as { address: string }
 
-router.get('/:address', apiKeyMiddleware, (req: Request, res: Response) => {
-  const { address } = req.params
+    const trustScore = getTrustScore(address)
 
-  if (!ETH_ADDRESS_RE.test(address)) {
-    res.status(400).json({
-      error: 'Invalid address format. Expected an Ethereum address: 0x followed by 40 hex characters.',
-    })
-    return
-  }
+    if (!trustScore) {
+      res.status(404).json({
+        error: `No identity record found for address ${address}.`,
+      })
+      return
+    }
 
-  const trustScore = getTrustScore(address)
-
-  if (!trustScore) {
-    res.status(404).json({
-      error: `No identity record found for address ${address}.`,
-    })
-    return
-  }
-
-  res.json(trustScore)
-})
+    res.json(trustScore)
+  },
+)
 
 export default router
