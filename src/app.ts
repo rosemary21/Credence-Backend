@@ -3,6 +3,7 @@ import { createHealthRouter } from './routes/health.js'
 import { createDefaultProbes } from './services/health/probes.js'
 import trustRouter from './routes/trust.js'
 import bulkRouter from './routes/bulk.js'
+import importsRouter from './routes/imports.js'
 import { createAdminRouter } from './routes/admin/index.js'
 import { validate } from './middleware/validate.js'
 import {
@@ -66,6 +67,9 @@ app.post(
 
 // Bulk verification (enterprise)
 app.use('/api/bulk', bulkRouter)
+
+// Import preview (enterprise)
+app.use('/api/imports', importsRouter)
 
 // Admin API
 app.use('/api/admin', createAdminRouter())
