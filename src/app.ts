@@ -88,7 +88,7 @@ app.post(
 // Bulk verification (enterprise)
 app.use('/api/bulk', bulkRouter)
 
-// Admin management
+// Admin API
 app.use('/api/admin', createAdminRouter())
 
 export default app

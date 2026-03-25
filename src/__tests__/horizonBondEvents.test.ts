@@ -24,7 +24,7 @@ vi.mock('stellar-sdk', () => {
   return { Server: MockServer }
 })
 
-vi.mock('../services/identityService', () => ({
+vi.mock('../services/identityService.js', () => ({
   upsertIdentity: mocks.upsertIdentity,
   upsertBond: mocks.upsertBond,
 }))
