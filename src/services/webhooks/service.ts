@@ -1,5 +1,7 @@
 import type { WebhookStore, WebhookEventType, WebhookPayload, WebhookDeliveryResult } from './types.js'
 import { deliverWebhook, type DeliveryOptions } from './delivery.js'
+import { buildDlqEntry, type MemoryDlqStore } from './dlq.js'
+import type { DlqStore } from './types.js'
 
 /**
  * Webhook service for delivering bond lifecycle events.
@@ -10,12 +12,14 @@ export class WebhookService {
 
   constructor(
     private readonly store: WebhookStore,
-    private readonly deliveryOptions?: DeliveryOptions
+    private readonly deliveryOptions?: DeliveryOptions,
+    private readonly dlq?: DlqStore
   ) {}
 
   /**
    * Emit an event to all subscribed webhooks.
    * Deliveries are queued and rate-limited per webhook.
+   * Permanently failed deliveries are routed to the DLQ if one is configured.
    */
   async emit(event: WebhookEventType, data: WebhookPayload['data']): Promise<WebhookDeliveryResult[]> {
     const webhooks = await this.store.getByEvent(event)
@@ -36,6 +40,14 @@ export class WebhookService {
         deliverWebhook(webhook, payload, this.deliveryOptions)
       ))
     )
+
+    if (this.dlq) {
+      await Promise.all(
+        results
+          .filter(r => !r.success)
+          .map(r => this.dlq!.push(buildDlqEntry(r, payload)))
+      )
+    }
 
     return results
   }
@@ -65,7 +77,8 @@ export class WebhookService {
  */
 export function createWebhookService(
   store: WebhookStore,
-  deliveryOptions?: DeliveryOptions
+  deliveryOptions?: DeliveryOptions,
+  dlq?: DlqStore
 ): WebhookService {
-  return new WebhookService(store, deliveryOptions)
+  return new WebhookService(store, deliveryOptions, dlq)
 }

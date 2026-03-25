@@ -42,6 +42,8 @@ export async function deliverWebhook(
 
   let attempts = 0
   let lastError: string | undefined
+  let lastStatusCode: number | undefined
+  let lastResponseBodySnippet: string | undefined
 
   for (let i = 0; i <= maxRetries; i++) {
     attempts++
@@ -71,8 +73,15 @@ export async function deliverWebhook(
         }
       }
 
+      lastStatusCode = response.status
       lastError = `HTTP ${response.status}`
-      
+      try {
+        const text = await response.text()
+        lastResponseBodySnippet = text.slice(0, 500)
+      } catch {
+        // ignore body read errors
+      }
+
       // Don't retry on 4xx errors (client errors)
       if (response.status >= 400 && response.status < 500) {
         break
@@ -93,5 +102,7 @@ export async function deliverWebhook(
     success: false,
     error: lastError,
     attempts,
+    statusCode: lastStatusCode,
+    responseBodySnippet: lastResponseBodySnippet,
   }
 }

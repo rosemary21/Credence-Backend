@@ -51,6 +51,35 @@ export interface WebhookDeliveryResult {
   error?: string
   /** Number of attempts made. */
   attempts: number
+  /** First 500 chars of response body on failure. */
+  responseBodySnippet?: string
+}
+
+/**
+ * Dead-letter queue entry for a permanently failed webhook delivery.
+ */
+export interface DlqEntry {
+  id: string
+  webhookId: string
+  /** Payload with secrets redacted. */
+  payload: WebhookPayload
+  failedAt: string
+  attempts: number
+  lastStatusCode?: number
+  lastError?: string
+  responseBodySnippet?: string
+  /** ISO timestamp of last replay attempt, if any. */
+  replayedAt?: string
+}
+
+/**
+ * Store for dead-letter queue entries.
+ */
+export interface DlqStore {
+  push(entry: DlqEntry): Promise<void>
+  list(): Promise<DlqEntry[]>
+  get(id: string): Promise<DlqEntry | null>
+  markReplayed(id: string, replayedAt: string): Promise<void>
 }
 
 /**

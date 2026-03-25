@@ -125,21 +125,22 @@ describe('deliverWebhook', () => {
   })
 
   it('does not retry on 4xx client errors', async () => {
-    global.fetch = vi.fn().mockResolvedValue({ ok: false, status: 400 })
+    global.fetch = vi.fn().mockResolvedValue({ ok: false, status: 400, text: async () => 'Bad Request' })
 
     const result = await deliverWebhook(mockWebhook, mockPayload, { maxRetries: 3 })
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       webhookId: 'wh_123',
       success: false,
       error: 'HTTP 400',
+      statusCode: 400,
       attempts: 1,
     })
     expect(fetch).toHaveBeenCalledTimes(1)
   })
 
   it('fails after max retries exhausted', async () => {
-    global.fetch = vi.fn().mockResolvedValue({ ok: false, status: 500 })
+    global.fetch = vi.fn().mockResolvedValue({ ok: false, status: 500, text: async () => 'Server Error' })
 
     const promise = deliverWebhook(mockWebhook, mockPayload, {
       maxRetries: 2,
@@ -151,10 +152,11 @@ describe('deliverWebhook', () => {
     
     const result = await promise
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       webhookId: 'wh_123',
       success: false,
       error: 'HTTP 500',
+      statusCode: 500,
       attempts: 3, // Initial + 2 retries
     })
     expect(fetch).toHaveBeenCalledTimes(3)

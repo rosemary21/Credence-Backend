@@ -6,10 +6,12 @@ import {
   parsePaginationParams,
 } from '../../lib/pagination.js'
 import { AdminService } from '../../services/admin/index.js'
-import { auditLogService } from '../../services/audit/index.js'
+import { auditLogService, AuditAction } from '../../services/audit/index.js'
 import { impersonationService } from '../../services/impersonation/index.js'
 import type { AssignRoleRequest, RevokeApiKeyRequest } from '../../services/admin/types.js'
 import type { IssueImpersonationTokenRequest } from '../../services/impersonation/types.js'
+import { dlqStore, memoryWebhookStore } from '../../services/webhooks/index.js'
+import { deliverWebhook } from '../../services/webhooks/delivery.js'
 
 /**
  * Create the admin router with role and user management endpoints
@@ -375,6 +377,56 @@ export function createAdminRouter(): Router {
         res.end()
       }
     }
+  })
+
+  /**
+   * GET /api/admin/webhooks/dlq
+   * List all dead-letter queue entries.
+   * @requires Admin role
+   */
+  router.get('/webhooks/dlq', requireUserAuth, requireAdminRole, async (_req: Request, res: Response) => {
+    const entries = await dlqStore.list()
+    res.json({ success: true, data: entries })
+  })
+
+  /**
+   * POST /api/admin/webhooks/dlq/:id/replay
+   * Replay a single DLQ entry by re-delivering its payload to the registered webhook.
+   * The action is audited.
+   * @requires Admin role
+   */
+  router.post('/webhooks/dlq/:id/replay', requireUserAuth, requireAdminRole, async (req: Request, res: Response) => {
+    const authReq = req as AuthenticatedRequest
+    const user = authReq.user!
+    const entry = await dlqStore.get(req.params.id)
+
+    if (!entry) {
+      res.status(404).json({ error: 'NotFound', message: 'DLQ entry not found' })
+      return
+    }
+
+    const webhook = await memoryWebhookStore.get(entry.webhookId)
+    if (!webhook) {
+      res.status(404).json({ error: 'NotFound', message: 'Webhook config not found' })
+      return
+    }
+
+    const result = await deliverWebhook(webhook, entry.payload)
+
+    const replayedAt = new Date().toISOString()
+    await dlqStore.markReplayed(entry.id, replayedAt)
+
+    auditLogService.logAction(
+      user.id,
+      user.email,
+      AuditAction.WEBHOOK_DLQ_REPLAY,
+      entry.webhookId,
+      '',
+      { dlqEntryId: entry.id, success: result.success, attempts: result.attempts },
+      result.success ? 'success' : 'failure',
+    )
+
+    res.json({ success: true, data: { result, replayedAt } })
   })
 
   return router
