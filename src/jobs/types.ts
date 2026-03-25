@@ -68,3 +68,33 @@ export interface SnapshotJobResult {
   /** Timestamp when job started. */
   startTime: string
 }
+
+/**
+ * Report job statuses.
+ */
+export enum ReportJobStatus {
+  QUEUED = 'queued',
+  RUNNING = 'running',
+  COMPLETED = 'completed',
+  FAILED = 'failed',
+}
+
+/**
+ * Report job information.
+ */
+export interface ReportJob {
+  /** Unique job ID. */
+  id: string
+  /** Type of report. */
+  type: string
+  /** Current status. */
+  status: ReportJobStatus
+  /** Failure reason code (if failed). */
+  failureReason?: string
+  /** URL or path to the generated artifact (if completed). */
+  artifactUrl?: string
+  /** ISO timestamp when job was created. */
+  createdAt: string
+  /** ISO timestamp when job was last updated. */
+  updatedAt: string
+}
