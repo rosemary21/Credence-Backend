@@ -111,6 +111,65 @@ export class AuditLogService {
     this.logs = []
     this.logId = 0
   }
+
+  /**
+   * Stream audit logs as an AsyncGenerator to avoid memory spikes
+   * Applies date filtering and redacts sensitive information compliance policy
+   * 
+   * @param startDate - Start date (inclusive)
+   * @param endDate - End date (inclusive)
+   */
+  async *exportLogsStream(startDate: Date, endDate: Date): AsyncGenerator<AuditLogEntry> {
+    const startMs = startDate.getTime()
+    const endMs = endDate.getTime()
+
+    // Sort logs descending but stream them chronologically or descending?
+    // Often compliance exports are fine descending, we'll keep the same order.
+    // Iterating over the array. Since it is in-memory we just filter and yield.
+    // In a database, this would use a cursor and fetch chunks.
+    for (const log of this.logs) {
+      const logTime = new Date(log.timestamp).getTime()
+      if (logTime >= startMs && logTime <= endMs) {
+        // Redact and yield
+        yield this.redactLogEntry(log)
+        // Yield to event loop to simulate genuine streaming and prevent blocking
+        await new Promise((resolve) => setImmediate(resolve))
+      }
+    }
+  }
+
+  /**
+   * Redact sensitive fields for compliance export
+   */
+  private redactLogEntry(entry: AuditLogEntry): AuditLogEntry {
+    const redacted = { ...entry }
+    
+    // Mask emails: preserve first character and domain
+    const maskEmail = (email: string) => {
+      if (!email || !email.includes('@')) return '***@***'
+      const [local, domain] = email.split('@')
+      const maskedLocal = local.length > 1 ? `${local[0]}***` : '***'
+      return `${maskedLocal}@${domain}`
+    }
+
+    if (redacted.adminEmail) {
+      redacted.adminEmail = maskEmail(redacted.adminEmail)
+    }
+    if (redacted.targetUserEmail) {
+      redacted.targetUserEmail = maskEmail(redacted.targetUserEmail)
+    }
+
+    // Mask IP address: mask last octet if IPv4
+    if (redacted.ipAddress) {
+      const parts = redacted.ipAddress.split('.')
+      if (parts.length === 4) {
+        parts[3] = '***'
+        redacted.ipAddress = parts.join('.')
+      }
+    }
+
+    return redacted
+  }
 }
 
 // Create a singleton instance

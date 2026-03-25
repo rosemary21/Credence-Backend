@@ -52,6 +52,17 @@ const CREATE_TABLE_STATEMENTS = [
     computed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   )
   `,
+  `
+  CREATE TABLE IF NOT EXISTS report_jobs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    type TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('queued', 'running', 'completed', 'failed')),
+    failure_reason TEXT,
+    artifact_url TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )
+  `,
   `CREATE INDEX IF NOT EXISTS bonds_identity_address_idx ON bonds (identity_address)`,
   `CREATE INDEX IF NOT EXISTS attestations_subject_address_idx ON attestations (subject_address)`,
   `CREATE INDEX IF NOT EXISTS attestations_bond_id_idx ON attestations (bond_id)`,
@@ -60,6 +71,7 @@ const CREATE_TABLE_STATEMENTS = [
 ] as const
 
 const DROP_TABLE_STATEMENTS = [
+  'DROP TABLE IF EXISTS report_jobs',
   'DROP TABLE IF EXISTS score_history',
   'DROP TABLE IF EXISTS slash_events',
   'DROP TABLE IF EXISTS attestations',
@@ -75,7 +87,7 @@ export async function createSchema(db: Queryable): Promise<void> {
 
 export async function resetDatabase(db: Queryable): Promise<void> {
   await db.query(
-    'TRUNCATE TABLE score_history, slash_events, attestations, bonds, identities RESTART IDENTITY CASCADE'
+    'TRUNCATE TABLE report_jobs, score_history, slash_events, attestations, bonds, identities RESTART IDENTITY CASCADE'
   )
 }
 

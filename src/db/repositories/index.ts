@@ -3,6 +3,7 @@ export * from './bondsRepository.js'
 export * from './identitiesRepository.js'
 export * from './scoreHistoryRepository.js'
 export * from './slashEventsRepository.js'
+export * from './reportRepository.js'
 
 export interface Identity {
      /** Surrogate UUID primary key. */
