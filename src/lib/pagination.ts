@@ -1,113 +1,137 @@
-/**
- * Pagination parameters interface.
- */
+export const DEFAULT_PAGE = 1
+export const DEFAULT_LIMIT = 20
+export const MAX_LIMIT = 100
+
 export interface PaginationParams {
-    limit: number;
-    offset: number;
-    cursor?: string;
+  page: number
+  limit: number
+  offset: number
 }
 
-/**
- * Paginated response structure.
- */
-export interface PaginatedResponse<T> {
-    data: T[];
-    pagination: {
-        nextOffset: number | null;
-        nextCursor?: string | null;
-        hasMore: boolean;
-        total?: number;
-    };
+export interface PaginationMeta {
+  page: number
+  limit: number
+  total: number
+  hasNext: boolean
 }
 
-/**
- * Encode a tuple (timestamp, id) into a base64 cursor string.
- */
-export function encodeCursor(t: string, i: string): string {
-    return Buffer.from(JSON.stringify({ t, i })).toString('base64');
+export interface PaginationParseOptions {
+  defaultPage?: number
+  defaultLimit?: number
+  maxLimit?: number
 }
 
-/**
- * Decode a base64 cursor string back to a tuple.
- */
-export function decodeCursor(cursor: string): { t: string; i: string } | null {
-    try {
-        const decoded = Buffer.from(cursor, 'base64').toString('utf-8');
-        const parsed = JSON.parse(decoded);
-        if (parsed && typeof parsed.t === 'string' && typeof parsed.i === 'string') {
-            return parsed;
-        }
-    } catch {
-        // ignore errors and return null
-    }
-    return null;
+export class PaginationValidationError extends Error {
+  readonly details: Array<{ path: string; message: string }>
+
+  constructor(details: Array<{ path: string; message: string }>) {
+    super('Invalid pagination parameters')
+    this.name = 'PaginationValidationError'
+    this.details = details
+  }
 }
 
-/**
- * Extracts and validates pagination parameters from a query object.
- *
- * @param query - The query object from an Express request
- * @param defaultLimit - Default limit if not provided (default 10)
- * @param maxLimit - Maximum allowed limit (default 100)
- * @returns Parsed and validated pagination parameters
- */
-export function getPaginationParams(
-    query: Record<string, any>,
-    defaultLimit = 10,
-    maxLimit = 100
+function parsePositiveInteger(value: unknown, path: string): number | undefined {
+  if (value === undefined) {
+    return undefined
+  }
+
+  if (typeof value === 'string' && value.trim() === '') {
+    return undefined
+  }
+
+  const parsed = Number(value)
+  if (!Number.isInteger(parsed)) {
+    throw new PaginationValidationError([{ path, message: 'Expected an integer' }])
+  }
+
+  return parsed
+}
+
+export function parsePaginationParams(
+  query: Record<string, unknown>,
+  options: PaginationParseOptions = {},
 ): PaginationParams {
-    let limit = defaultLimit;
-    let offset = 0;
-    let cursor: string | undefined = undefined;
+  const defaultPage = options.defaultPage ?? DEFAULT_PAGE
+  const defaultLimit = options.defaultLimit ?? DEFAULT_LIMIT
+  const maxLimit = options.maxLimit ?? MAX_LIMIT
 
-    if (query.limit !== undefined) {
-        const parsedLimit = parseInt(String(query.limit), 10);
-        if (!isNaN(parsedLimit) && parsedLimit > 0) {
-            limit = Math.min(parsedLimit, maxLimit);
-        }
+  const errors: Array<{ path: string; message: string }> = []
+
+  let page: number | undefined
+  let limit: number | undefined
+  let offset: number | undefined
+
+  try {
+    page = parsePositiveInteger(query.page, 'page')
+  } catch (error) {
+    if (error instanceof PaginationValidationError) {
+      errors.push(...error.details)
+    } else {
+      throw error
     }
+  }
 
-    if (query.offset !== undefined) {
-        const parsedOffset = parseInt(String(query.offset), 10);
-        if (!isNaN(parsedOffset) && parsedOffset >= 0) {
-            offset = parsedOffset;
-        }
+  try {
+    limit = parsePositiveInteger(query.limit, 'limit')
+  } catch (error) {
+    if (error instanceof PaginationValidationError) {
+      errors.push(...error.details)
+    } else {
+      throw error
     }
+  }
 
-    if (typeof query.cursor === 'string' && query.cursor.length > 0) {
-        cursor = query.cursor;
+  const rawOffset = query.offset ?? query.cursor
+  const offsetPath = query.offset !== undefined ? 'offset' : 'cursor'
+  try {
+    offset = parsePositiveInteger(rawOffset, offsetPath)
+  } catch (error) {
+    if (error instanceof PaginationValidationError) {
+      errors.push(...error.details)
+    } else {
+      throw error
     }
+  }
 
-    return { limit, offset, cursor };
+  if (page !== undefined && page < 1) {
+    errors.push({ path: 'page', message: 'Page must be at least 1' })
+  }
+  if (limit !== undefined && limit < 1) {
+    errors.push({ path: 'limit', message: 'Limit must be at least 1' })
+  }
+  if (limit !== undefined && limit > maxLimit) {
+    errors.push({ path: 'limit', message: `Limit must be at most ${maxLimit}` })
+  }
+  if (offset !== undefined && offset < 0) {
+    errors.push({ path: offsetPath, message: `${offsetPath} must be at least 0` })
+  }
+
+  if (errors.length > 0) {
+    throw new PaginationValidationError(errors)
+  }
+
+  const resolvedLimit = limit ?? defaultLimit
+  const resolvedPage =
+    page ?? (offset !== undefined ? Math.floor(offset / resolvedLimit) + 1 : defaultPage)
+  const resolvedOffset = offset ?? (resolvedPage - 1) * resolvedLimit
+
+  return {
+    page: resolvedPage,
+    limit: resolvedLimit,
+    offset: resolvedOffset,
+  }
 }
 
-/**
- * Builds a standardized paginated response.
- *
- * @param data - The array of data items for the current page
- * @param limit - The requested limit
- * @param offset - The requested offset
- * @param total - Optional total number of items
- * @param nextCursor - Optional cursor for the next page
- * @returns A structured paginated response
- */
-export function buildPaginatedResponse<T>(
-    data: T[],
-    limit: number,
-    offset: number,
-    total?: number,
-    nextCursor?: string | null
-): PaginatedResponse<T> {
-    const hasMore = data.length >= limit;
-    const nextOffset = hasMore ? offset + data.length : null;
-
-    return {
-        data,
-        pagination: {
-            nextOffset,
-            nextCursor,
-            hasMore,
-            ...(total !== undefined ? { total } : {}),
-        },
-    };
+export function buildPaginationMeta(
+  total: number,
+  page: number,
+  limit: number,
+): PaginationMeta {
+  return {
+    page,
+    limit,
+    total,
+    hasNext: page * limit < total,
+  }
 }
