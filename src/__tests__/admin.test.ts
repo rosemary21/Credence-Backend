@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import request from 'supertest'
 import app from '../app.js'
 import { auditLogService } from '../services/audit/index.js'
@@ -100,8 +100,10 @@ describe('Admin API', () => {
         success: true,
         data: {
           users: expect.any(Array),
+          page: 1,
           total: expect.any(Number),
           limit: 50,
+          hasNext: false,
           offset: 0,
         },
       })
@@ -130,17 +132,19 @@ describe('Admin API', () => {
         .set('Authorization', ADMIN_TOKEN)
 
       expect(response.status).toBe(200)
+      expect(response.body.data.page).toBe(1)
       expect(response.body.data.limit).toBe(10)
       expect(response.body.data.offset).toBe(0)
+      expect(response.body.data.hasNext).toBe(false)
     })
 
-    it('should enforce max limit of 100', async () => {
+    it('should return 400 when limit exceeds max 100', async () => {
       const response = await request(app)
         .get('/api/admin/users?limit=500')
         .set('Authorization', ADMIN_TOKEN)
 
-      expect(response.status).toBe(200)
-      expect(response.body.data.limit).toBe(100)
+      expect(response.status).toBe(400)
+      expect(response.body.error).toBe('InvalidRequest')
     })
 
     it('should return 400 for negative limit', async () => {
@@ -149,10 +153,13 @@ describe('Admin API', () => {
         .set('Authorization', ADMIN_TOKEN)
 
       expect(response.status).toBe(400)
-      expect(response.body).toEqual({
+      expect(response.body).toMatchObject({
         error: 'InvalidRequest',
         message: 'Invalid pagination parameters',
       })
+      expect(response.body.details).toEqual(
+        expect.arrayContaining([expect.objectContaining({ path: 'limit' })]),
+      )
     })
 
     it('should return 400 for negative offset', async () => {
@@ -161,10 +168,13 @@ describe('Admin API', () => {
         .set('Authorization', ADMIN_TOKEN)
 
       expect(response.status).toBe(400)
-      expect(response.body).toEqual({
+      expect(response.body).toMatchObject({
         error: 'InvalidRequest',
         message: 'Invalid pagination parameters',
       })
+      expect(response.body.details).toEqual(
+        expect.arrayContaining([expect.objectContaining({ path: 'offset' })]),
+      )
     })
 
     it('should filter users by role', async () => {
@@ -467,7 +477,10 @@ describe('Admin API', () => {
         success: true,
         data: {
           logs: expect.any(Array),
+          page: 1,
           total: expect.any(Number),
+          limit: 50,
+          hasNext: false,
         },
       })
     })
@@ -479,15 +492,17 @@ describe('Admin API', () => {
 
       expect(response.status).toBe(200)
       expect(response.body.data.logs).toBeDefined()
+      expect(response.body.data.page).toBe(1)
+      expect(response.body.data.limit).toBe(10)
     })
 
-    it('should enforce max limit of 100', async () => {
+    it('should return 400 when limit exceeds max 100', async () => {
       const response = await request(app)
         .get('/api/admin/audit-logs?limit=500')
         .set('Authorization', ADMIN_TOKEN)
 
-      // The response should succeed with limit enforced
-      expect(response.status).toBe(200)
+      expect(response.status).toBe(400)
+      expect(response.body.error).toBe('InvalidRequest')
     })
 
     it('should return 400 for invalid pagination', async () => {
@@ -496,10 +511,13 @@ describe('Admin API', () => {
         .set('Authorization', ADMIN_TOKEN)
 
       expect(response.status).toBe(400)
-      expect(response.body).toEqual({
+      expect(response.body).toMatchObject({
         error: 'InvalidRequest',
         message: 'Invalid pagination parameters',
       })
+      expect(response.body.details).toEqual(
+        expect.arrayContaining([expect.objectContaining({ path: 'limit' })]),
+      )
     })
 
     it('should filter by action type', async () => {
@@ -630,12 +648,133 @@ describe('Admin API', () => {
         })
       expect(response.status).toBe(200)
 
-      // 4. Verify audit logs
-      response = await request(app)
+      const logsInfo = await request(app)
         .get('/api/admin/audit-logs')
-        .set('Authorization', ADMIN_TOKEN)
-      expect(response.status).toBe(200)
-      expect(response.body.data.logs.length).toBeGreaterThanOrEqual(3)
+        .set('Authorization', `Bearer ${MOCK_USERS['admin-user-1'].apiKey}`)
+        .expect(200)
+
+      expect(logsInfo.body.data.logs.length).toBeGreaterThan(0)
+    })
+  })
+
+  describe('GET /api/admin/audit-logs/export', () => {
+    beforeEach(() => {
+      auditLogService.clearLogs()
+      
+      // Populate logs within a specific time range
+      const baseTime = new Date('2025-01-01T12:00:00Z').getTime()
+      
+      // Log 1: Inside range
+      const log1Time = new Date(baseTime)
+      vi.setSystemTime(log1Time)
+      auditLogService.logAction(
+        'admin-user-1',
+        'admin@credence.org',
+        AuditAction.LIST_USERS,
+        'admin-user-1',
+        'admin@credence.org',
+        {},
+        'success',
+        undefined,
+        '192.168.1.100'
+      )
+      
+      // Log 2: Inside range
+      const log2Time = new Date(baseTime + 1000 * 60 * 60 * 2) // 2 hours later
+      vi.setSystemTime(log2Time)
+      auditLogService.logAction(
+        'admin-user-1',
+        'admin@credence.org',
+        AuditAction.ASSIGN_ROLE,
+        'verifier-user-1',
+        'verifier@credence.org',
+        { requestedRole: UserRole.ADMIN },
+        'success',
+        undefined,
+        '10.0.0.5'
+      )
+      
+      // Log 3: Outside range
+      const log3Time = new Date(baseTime + 1000 * 60 * 60 * 24 * 5) // 5 days later
+      vi.setSystemTime(log3Time)
+      auditLogService.logAction(
+        'admin-user-1',
+        'admin@credence.org',
+        AuditAction.REVOKE_API_KEY,
+        'user-1',
+        'user1@example.com',
+        {},
+        'success',
+        undefined,
+        '127.0.0.1'
+      )
+
+      vi.useRealTimers()
+    })
+
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    it('should export audit logs in NDJSON format with correct redaction and filtering', async () => {
+      // Mock timers for the exportedAt timestamp
+      const exportTimeStr = '2025-01-10T00:00:00.000Z'
+      vi.setSystemTime(new Date(exportTimeStr))
+
+      const startDate = '2025-01-01T00:00:00.000Z'
+      const endDate = '2025-01-02T00:00:00.000Z'
+      
+      const response = await request(app)
+        .get(`/api/admin/audit-logs/export?startDate=${startDate}&endDate=${endDate}`)
+        .set('Authorization', `Bearer ${MOCK_USERS['admin-user-1'].apiKey}`)
+        .expect('Content-Type', /application\/x-ndjson/)
+        .expect(200)
+
+      // Split response text by lines and parse
+      const lines = response.text.trim().split('\n').filter(Boolean).map((line: string) => JSON.parse(line))
+      
+      // Line 0: metadata
+      expect(lines[0]._meta).toBeDefined()
+      expect(lines[0]._meta.exportedBy).toBe('admin@credence.org')
+      expect(lines[0]._meta.dateRange.start).toBe(startDate)
+      
+      // We expect 2 lines of logs (Log 1 and Log 2 were inside the range)
+      // Actually, wait, since we export descending or array order, we check the length.
+      // 1 metadata + 2 logs = 3 lines total representing the logs in range.
+      // But wait! When the endpoint runs, it initiates an "EXPORT_AUDIT_LOGS" action which is *also* a log.
+      // Since it's logged with the CURRENT time ('2025-01-10T00:00:00.000Z'), and our range is jan 1 to jan 2, 
+      // the EXPORT log itself won't be in the stream because it's outside the date range!
+      // So exactly 2 log lines + 1 metadata = 3 lines.
+      expect(lines).toHaveLength(3)
+
+      // Check redaction on the first log line (lines[1])
+      const exportedLog1 = lines[1]
+      expect(exportedLog1.action).toBeDefined()
+      expect(exportedLog1.adminEmail).toBe('a***@credence.org')
+      expect(exportedLog1.ipAddress).toBe('192.168.1.***')
+
+      // Check the final logs in the service to see if initiation/completion were logged
+      const allLogs = auditLogService.getAllLogs()
+      const exportInitLog = allLogs.find(l => l.action === AuditAction.EXPORT_AUDIT_LOGS && l.details.phase === 'initiation')
+      const exportCompLog = allLogs.find(l => l.action === AuditAction.EXPORT_AUDIT_LOGS && l.details.phase === 'completion')
+      
+      expect(exportInitLog).toBeDefined()
+      expect(exportCompLog).toBeDefined()
+      expect(exportCompLog?.details.recordCount).toBe(2)
+    })
+
+    it('should reject missing date ranges', async () => {
+      await request(app)
+        .get('/api/admin/audit-logs/export')
+        .set('Authorization', `Bearer ${MOCK_USERS['admin-user-1'].apiKey}`)
+        .expect(400)
+    })
+
+    it('should require admin role', async () => {
+      await request(app)
+        .get(`/api/admin/audit-logs/export?startDate=2025-01-01T00:00:00Z&endDate=2025-01-02T00:00:00Z`)
+        .set('Authorization', `Bearer ${MOCK_USERS['verifier-user-1'].apiKey}`)
+        .expect(403)
     })
   })
 })

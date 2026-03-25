@@ -3,6 +3,7 @@ export * from './bondsRepository.js'
 export * from './identitiesRepository.js'
 export * from './scoreHistoryRepository.js'
 export * from './slashEventsRepository.js'
+export * from './reportRepository.js'
 
 export interface Identity {
      /** Surrogate UUID primary key. */
@@ -60,4 +61,27 @@ export interface CreateBondInput {
 export interface UpdateBondInput {
      slashedAmount?: string
      active?: boolean
+}
+
+export type SettlementStatus = 'pending' | 'settled' | 'failed'
+
+/** Row shape for the `settlements` table. */
+export interface SettlementRecord {
+     id: string
+     bondId: string
+     amount: string
+     transactionHash: string
+     settledAt: Date
+     status: SettlementStatus
+     createdAt: Date
+     updatedAt: Date
+}
+
+/** Fields required to create or upsert a settlement. */
+export interface CreateSettlementInput {
+     bondId: string
+     amount: string
+     transactionHash: string
+     settledAt?: Date
+     status?: SettlementStatus
 }
