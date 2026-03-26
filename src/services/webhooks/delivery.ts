@@ -1,4 +1,5 @@
 import { createHmac } from 'crypto'
+import { normalizeTransportError, isRetryableHttpStatus } from '../../clients/httpErrors.js'
 import type { WebhookConfig, WebhookPayload, WebhookDeliveryResult } from './types.js'
 
 /**
@@ -45,10 +46,11 @@ export async function deliverWebhook(
 
   for (let i = 0; i <= maxRetries; i++) {
     attempts++
-    try {
-      const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), timeout)
 
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), timeout)
+
+    try {
       const response = await fetch(webhook.url, {
         method: 'POST',
         headers: {
@@ -60,8 +62,6 @@ export async function deliverWebhook(
         signal: controller.signal,
       })
 
-      clearTimeout(timeoutId)
-
       if (response.ok) {
         return {
           webhookId: webhook.id,
@@ -72,13 +72,25 @@ export async function deliverWebhook(
       }
 
       lastError = `HTTP ${response.status}`
-      
-      // Don't retry on 4xx errors (client errors)
-      if (response.status >= 400 && response.status < 500) {
+
+      // 4xx errors are non-retriable: the server rejected the request and
+      // repeating it will not change the outcome (except 408/429 which are
+      // transient and handled by isRetryableHttpStatus).
+      if (!isRetryableHttpStatus(response.status)) {
         break
       }
     } catch (err) {
-      lastError = err instanceof Error ? err.message : 'Unknown error'
+      // Normalize to a structured transport error so timeout and connection-reset
+      // are classified consistently rather than left as raw exception messages.
+      const transport = normalizeTransportError(err)
+      lastError = transport
+        ? `${transport.code}: ${transport.message}`
+        : (err instanceof Error ? err.message : 'Unknown error')
+    } finally {
+      // Always clear the abort timer regardless of success, failure, or throw.
+      // Without this, every failed attempt leaks a dangling timer that fires
+      // against an already-completed AbortController.
+      clearTimeout(timeoutId)
     }
 
     // Wait before retry (except on last attempt)

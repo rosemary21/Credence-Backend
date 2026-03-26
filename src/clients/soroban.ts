@@ -1,3 +1,5 @@
+import { isAbortError, isNetworkError, normalizeTransportError } from './httpErrors.js'
+
 export type SorobanNetwork = 'testnet' | 'mainnet'
 
 export interface RetryOptions {
@@ -238,6 +240,22 @@ export class SorobanClient {
       try {
         payload = (await response.json()) as SorobanRpcResponse<T>
       } catch (error) {
+        // If the body read was interrupted by an abort (timeout fired while
+        // streaming) or a connection reset, surface the real transport error
+        // so the retry classifier handles it correctly instead of treating it
+        // as a non-retriable PARSE_ERROR.
+        const transport = normalizeTransportError(error)
+        if (transport !== null) {
+          throw new SorobanClientError({
+            code: transport.code === 'TIMEOUT' ? 'TIMEOUT_ERROR' : 'NETWORK_ERROR',
+            message:
+              transport.code === 'TIMEOUT'
+                ? `Soroban RPC response timed out while reading body after ${this.timeoutMs}ms.`
+                : `Soroban RPC transport error reading body: ${transport.message}`,
+            attempts: attempt,
+            cause: error,
+          })
+        }
         throw new SorobanClientError({
           code: 'PARSE_ERROR',
           message: 'Unable to parse Soroban RPC response JSON.',
@@ -284,10 +302,22 @@ export class SorobanClient {
       return error
     }
 
-    if (error instanceof Error && error.name === 'AbortError') {
+    // Use shared detector so DOMException, Error, and cause-chained variants
+    // (e.g. undici's TypeError { cause: AbortError }) are all caught.
+    if (isAbortError(error)) {
       return new SorobanClientError({
         code: 'TIMEOUT_ERROR',
         message: `Soroban RPC request timed out after ${this.timeoutMs}ms.`,
+        attempts,
+        cause: error,
+      })
+    }
+
+    if (isNetworkError(error)) {
+      const msg = error instanceof Error ? error.message : 'Unknown transport error'
+      return new SorobanClientError({
+        code: 'NETWORK_ERROR',
+        message: `Soroban RPC transport error: ${msg}`,
         attempts,
         cause: error,
       })
