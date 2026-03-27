@@ -96,6 +96,7 @@ const CREATE_TABLE_STATEMENTS = [
 ] as const
 
 const DROP_TABLE_STATEMENTS = [
+  'DROP TABLE IF EXISTS webhook_configs',
   'DROP TABLE IF EXISTS idempotency_keys',
   'DROP TABLE IF EXISTS settlements',
   'DROP TABLE IF EXISTS report_jobs',
@@ -114,7 +115,7 @@ export async function createSchema(db: Queryable): Promise<void> {
 
 export async function resetDatabase(db: Queryable): Promise<void> {
   await db.query(
-    'TRUNCATE TABLE idempotency_keys, settlements, report_jobs, score_history, slash_events, attestations, bonds, identities RESTART IDENTITY CASCADE'
+    'TRUNCATE TABLE idempotency_keys, settlements, report_jobs, score_history, slash_events, attestations, bonds, identities, webhook_configs RESTART IDENTITY CASCADE'
   )
 }
 

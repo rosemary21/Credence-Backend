@@ -22,6 +22,8 @@ export function signPayload(payload: string, secret: string): string {
   return createHmac('sha256', secret).update(payload).digest('hex')
 }
 
+const GRACE_PERIOD_MS = 24 * 60 * 60 * 1000
+
 /**
  * Deliver webhook with retry and exponential backoff.
  */
@@ -38,7 +40,19 @@ export async function deliverWebhook(
   } = options
 
   const payloadStr = JSON.stringify(payload)
-  const signature = signPayload(payloadStr, webhook.secret)
+  
+  // SUPPORT DUAL SIGNATURES DURING GRACE PERIOD
+  const signatures: string[] = [signPayload(payloadStr, webhook.secret)]
+  
+  if (webhook.previousSecret) {
+    const now = Date.now()
+    const rotatedAt = webhook.secretUpdatedAt.getTime()
+    if (now - rotatedAt < GRACE_PERIOD_MS) {
+      signatures.push(signPayload(payloadStr, webhook.previousSecret))
+    }
+  }
+
+  const signatureHeader = signatures.join(',')
 
   let attempts = 0
   let lastError: string | undefined
@@ -53,7 +67,7 @@ export async function deliverWebhook(
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-Webhook-Signature': signature,
+          'X-Webhook-Signature': signatureHeader,
           'X-Webhook-Event': payload.event,
         },
         body: payloadStr,

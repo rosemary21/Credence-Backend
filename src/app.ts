@@ -4,6 +4,7 @@ import { createDefaultProbes } from './services/health/probes.js'
 import trustRouter from './routes/trust.js'
 import bulkRouter from './routes/bulk.js'
 import { createAdminRouter } from './routes/admin/index.js'
+import { createWebhookAdminRouter } from './routes/admin/webhooks.js'
 import { createAnalyticsRouter } from './routes/analytics.js'
 import { AnalyticsService } from './services/analytics/service.js'
 import { pool } from './db/pool.js'
@@ -103,6 +104,7 @@ app.use('/api/bulk', bulkRouter)
 
 // Admin API
 app.use('/api/admin', createAdminRouter())
+app.use('/api/admin/webhooks', createWebhookAdminRouter())
 
 const analyticsThresholdSeconds = Number(process.env.ANALYTICS_STALENESS_SECONDS ?? '300')
 const analyticsService = process.env.DATABASE_URL

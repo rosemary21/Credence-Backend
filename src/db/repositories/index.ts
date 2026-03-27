@@ -6,6 +6,7 @@ export * from './slashEventsRepository.js'
 export * from './reportRepository.js'
 export * from './settlementsRepository.js'
 export * from './idempotencyRepository.js'
+export * from './webhookRepository.js'
 
 export interface Identity {
      /** Surrogate UUID primary key. */
