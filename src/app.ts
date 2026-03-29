@@ -105,6 +105,7 @@ app.use('/api/bulk', bulkRouter)
 
 // Admin API
 app.use('/api/admin', createAdminRouter())
+app.use('/api/admin/webhooks', createWebhookAdminRouter())
 
 // Policy engine – fine-grained org permissions
 app.use('/api/orgs/:orgId/policies', createPolicyRouter())

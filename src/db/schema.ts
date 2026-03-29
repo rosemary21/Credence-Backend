@@ -79,6 +79,29 @@ const CREATE_TABLE_STATEMENTS = [
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   )
   `,
+  `
+  CREATE TABLE IF NOT EXISTS settlements (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    bond_id BIGINT NOT NULL REFERENCES bonds(id) ON DELETE CASCADE,
+    amount NUMERIC(36, 18) NOT NULL CHECK (amount >= 0),
+    transaction_hash VARCHAR(128) NOT NULL,
+    settled_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    status TEXT NOT NULL CHECK (status IN ('pending', 'settled', 'failed')),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT settlements_bond_tx_unique UNIQUE (bond_id, transaction_hash)
+  )
+  `,
+  `
+  CREATE TABLE IF NOT EXISTS idempotency_keys (
+    key TEXT PRIMARY KEY,
+    request_hash TEXT NOT NULL,
+    response_code INTEGER NOT NULL,
+    response_body JSONB NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )
+  `,
   `CREATE INDEX IF NOT EXISTS bonds_identity_address_idx ON bonds (identity_address)`,
   `CREATE INDEX IF NOT EXISTS attestations_subject_address_idx ON attestations (subject_address)`,
   `CREATE INDEX IF NOT EXISTS attestations_bond_id_idx ON attestations (bond_id)`,
