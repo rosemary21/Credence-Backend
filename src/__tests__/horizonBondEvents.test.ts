@@ -1,71 +1,91 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { subscribeBondCreationEvents } from '../listeners/horizonBondEvents.js'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-// Explicitly type mockStream and events
-let mockStream: (op: any) => Promise<void>
-let events: any[] = []
+const streamState = vi.hoisted(() => ({
+  onmessage: undefined as undefined | ((op: any) => Promise<void>),
+}))
 
-vi.mock('stellar-sdk', () => {
-  function MockServer() {
-    return {
-      operations: vi.fn(() => ({
-        forAsset: vi.fn(() => ({
-          cursor: vi.fn(() => ({
-            stream: vi.fn(({ onmessage }: { onmessage: (op: any) => Promise<void> }) => {
-              mockStream = onmessage
-            }),
-          })),
-        })),
-      })),
+vi.mock('@stellar/stellar-sdk', () => {
+  class ServerMock {
+    operations() {
+      return {
+        forAsset: () => ({
+          cursor: () => ({
+            stream: ({ onmessage }: { onmessage: (op: any) => Promise<void> }) => {
+              streamState.onmessage = onmessage
+            },
+          }),
+        }),
+      }
     }
   }
-  return { Server: MockServer }
+
+  return { Horizon: { Server: ServerMock } }
 })
 
-vi.mock('../services/identityService.js', () => ({
-  upsertIdentity: vi.fn().mockResolvedValue(true),
-  upsertBond: vi.fn().mockResolvedValue(true),
+vi.mock('../services/identityService', () => ({
+  upsertIdentity: vi.fn().mockResolvedValue(undefined),
+  upsertBond: vi.fn().mockResolvedValue(undefined),
 }))
+
+import { subscribeBondCreationEvents } from '../listeners/horizonBondEvents.js'
+import { upsertBond, upsertIdentity } from '../services/identityService.js'
 
 describe('Horizon Bond Creation Listener', () => {
   beforeEach(() => {
-    events = []
     vi.clearAllMocks()
+    streamState.onmessage = undefined
   })
 
-  it('should parse and upsert bond creation events', async () => {
-    const { upsertIdentity, upsertBond } = await import('../services/identityService.js') as any
+  it('subscribes without throwing', () => {
+    expect(() => subscribeBondCreationEvents(vi.fn())).not.toThrow()
+    expect(streamState.onmessage).toBeTypeOf('function')
+  })
 
-    const op = {
+  it('accepts an undefined callback', () => {
+    expect(() => subscribeBondCreationEvents(undefined)).not.toThrow()
+    expect(streamState.onmessage).toBeTypeOf('function')
+  })
+
+  it('parses and upserts create_bond events', async () => {
+    const onEvent = vi.fn()
+    subscribeBondCreationEvents(onEvent)
+
+    await streamState.onmessage?.({
       type: 'create_bond',
       source_account: 'GABC...',
       id: 'bond123',
       amount: '1000',
       duration: '365',
       paging_token: 'token1',
-    }
-
-    subscribeBondCreationEvents((event: any) => events.push(event))
-    if (mockStream) await mockStream(op)
+    })
 
     expect(upsertIdentity).toHaveBeenCalledWith({ id: 'GABC...' })
     expect(upsertBond).toHaveBeenCalledWith({ id: 'bond123', amount: '1000', duration: '365' })
-    expect(events.length).toBe(1)
-    expect(events[0].identity.id).toBe('GABC...')
-    expect(events[0].bond.id).toBe('bond123')
+    expect(onEvent).toHaveBeenCalledWith({
+      identity: { id: 'GABC...' },
+      bond: { id: 'bond123', amount: '1000', duration: '365' },
+    })
   })
 
-  it('should ignore non-bond events', async () => {
-    const op = { type: 'payment', id: 'other' }
-    subscribeBondCreationEvents((event: any) => events.push(event))
-    if (mockStream) await mockStream(op)
-    expect(events.length).toBe(0)
+  it('ignores non-bond events', async () => {
+    const onEvent = vi.fn()
+    subscribeBondCreationEvents(onEvent)
+
+    await streamState.onmessage?.({
+      type: 'payment',
+      id: 'other',
+      paging_token: 'token2',
+    })
+
+    expect(upsertIdentity).not.toHaveBeenCalled()
+    expect(upsertBond).not.toHaveBeenCalled()
+    expect(onEvent).not.toHaveBeenCalled()
   })
 
-  it('should handle duplicate bond events gracefully', async () => {
-    const { upsertBond } = await import('../services/identityService.js') as any
+  it('handles duplicate create_bond events consistently', async () => {
+    subscribeBondCreationEvents(vi.fn())
 
-    const op = {
+    const event = {
       type: 'create_bond',
       source_account: 'GABC...',
       id: 'bond123',
@@ -74,18 +94,10 @@ describe('Horizon Bond Creation Listener', () => {
       paging_token: 'token1',
     }
 
-    subscribeBondCreationEvents(() => {})
-    if (mockStream) await mockStream(op)
-    if (mockStream) await mockStream(op) // Duplicate
+    await streamState.onmessage?.(event)
+    await streamState.onmessage?.(event)
+
+    expect(upsertIdentity).toHaveBeenCalledTimes(2)
     expect(upsertBond).toHaveBeenCalledTimes(2)
-  })
-
-  it('calls subscribeBondCreationEvents without throwing', () => {
-    const onEvent = vi.fn()
-    expect(() => subscribeBondCreationEvents(onEvent)).not.toThrow()
-  })
-
-  it('works when no callback is provided', () => {
-    expect(() => subscribeBondCreationEvents(undefined)).not.toThrow()
   })
 })

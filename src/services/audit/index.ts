@@ -1,12 +1,18 @@
-import { AuditLogEntry, AuditAction } from './types.js'
+import { pool } from '../../db/pool.js'
+import {
+  InMemoryAuditLogsRepository,
+  PostgresAuditLogsRepository,
+  type AuditLogRepository,
+} from '../../db/repositories/auditLogsRepository.js'
+import type { AuditLogEntry, AuditLogFilters, AuditLogInput, AuditStatus } from './types.js'
+import { AuditAction } from './types.js'
 
 /**
  * Audit log service for tracking admin actions
  * In production, this would write to a database or centralized logging system
  */
 export class AuditLogService {
-  private logs: AuditLogEntry[] = []
-  private logId = 0
+  constructor(private readonly repository: AuditLogRepository) {}
 
   /**
    * Log an admin action
@@ -22,33 +28,44 @@ export class AuditLogService {
    * @param ipAddress - IP address of the requester
    * @returns The created audit log entry
    */
-  logAction(
-    adminId: string,
-    adminEmail: string,
-    action: AuditAction,
-    targetUserId: string,
-    targetUserEmail: string,
-    details: Record<string, unknown> = {},
-    status: 'success' | 'failure' = 'success',
+  async logAction(
+    inputOrActorId: AuditLogInput | string,
+    actorEmail?: string,
+    action?: AuditAction | string,
+    targetUserId?: string,
+    targetUserEmail?: string,
+    details?: Record<string, unknown>,
+    status?: AuditStatus,
     errorMessage?: string,
-    ipAddress?: string
-  ): AuditLogEntry {
-    const entry: AuditLogEntry = {
-      id: `audit-${this.logId++}`,
-      timestamp: new Date().toISOString(),
-      adminId,
-      adminEmail,
-      action,
-      targetUserId,
-      targetUserEmail,
-      details,
-      ipAddress,
-      status,
-      errorMessage,
+    ipAddress?: string,
+  ): Promise<AuditLogEntry> {
+    if (typeof inputOrActorId !== 'string') {
+      return this.repository.append(inputOrActorId)
     }
 
-    this.logs.push(entry)
-    return entry
+    const actorId = inputOrActorId
+    const effectiveAction = action ?? 'UNKNOWN_ACTION'
+    const resourceType =
+      effectiveAction === AuditAction.LIST_USERS || effectiveAction === AuditAction.EXPORT_AUDIT_LOGS
+        ? 'admin_user'
+        : 'user'
+
+    const mappedDetails: Record<string, unknown> = {
+      ...(details ?? {}),
+      ...(targetUserEmail ? { targetUserEmail } : {}),
+    }
+
+    return this.repository.append({
+      actorId,
+      actorEmail: actorEmail ?? 'unknown@unknown',
+      action: effectiveAction,
+      resourceType,
+      resourceId: targetUserId ?? actorId,
+      details: mappedDetails,
+      status,
+      errorMessage,
+      ipAddress,
+    })
   }
 
   /**
@@ -59,62 +76,96 @@ export class AuditLogService {
    * @param offset - Pagination offset (default: 0)
    * @returns Array of matching audit log entries and total count
    */
-  getLogs(
-    filters?: {
-      action?: AuditAction
-      adminId?: string
-      targetUserId?: string
-      status?: 'success' | 'failure'
-    },
+  async getLogs(
+    filters?: AuditLogFilters,
     limit = 100,
     offset = 0
-  ): {
-    logs: AuditLogEntry[]
-    total: number
-  } {
-    let filtered = this.logs
-
-    if (filters?.action) {
-      filtered = filtered.filter((log) => log.action === filters.action)
-    }
-    if (filters?.adminId) {
-      filtered = filtered.filter((log) => log.adminId === filters.adminId)
-    }
-    if (filters?.targetUserId) {
-      filtered = filtered.filter((log) => log.targetUserId === filters.targetUserId)
-    }
-    if (filters?.status) {
-      filtered = filtered.filter((log) => log.status === filters.status)
-    }
-
-    // Sort by timestamp descending (newest first)
-    filtered.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
-
-    const total = filtered.length
-    const paginated = filtered.slice(offset, offset + limit)
-
-    return { logs: paginated, total }
+  ): Promise<{ logs: AuditLogEntry[]; total: number }> {
+    return this.repository.query(filters, limit, offset)
   }
 
   /**
    * Get all audit logs (for testing)
    * @returns All audit log entries
    */
-  getAllLogs(): AuditLogEntry[] {
-    return this.logs
+  async getAllLogs(): Promise<AuditLogEntry[]> {
+    return this.repository.getAll()
   }
 
   /**
    * Clear all logs (for testing)
    */
-  clearLogs(): void {
-    this.logs = []
-    this.logId = 0
+  async clearLogs(): Promise<void> {
+    await this.repository.clear()
+  }
+
+  /**
+   * Stream audit logs as an AsyncGenerator to avoid memory spikes
+   * Applies date filtering and redacts sensitive information compliance policy
+   * 
+   * @param startDate - Start date (inclusive)
+   * @param endDate - End date (inclusive)
+   */
+  async *exportLogsStream(startDate: Date, endDate: Date): AsyncGenerator<AuditLogEntry> {
+    const startMs = startDate.getTime()
+    const endMs = endDate.getTime()
+
+    const logs = await this.getAllLogs()
+    for (const log of logs) {
+      const logTime = new Date(log.timestamp).getTime()
+      if (logTime >= startMs && logTime <= endMs) {
+        yield this.redactLogEntry(log)
+        await new Promise((resolve) => setImmediate(resolve))
+      }
+    }
+  }
+
+  /**
+   * Redact sensitive fields for compliance export
+   */
+  private redactLogEntry(entry: AuditLogEntry): AuditLogEntry {
+    const redacted = { ...entry }
+    
+    // Mask emails: preserve first character and domain
+    const maskEmail = (email: string) => {
+      if (!email || !email.includes('@')) return '***@***'
+      const [local, domain] = email.split('@')
+      const maskedLocal = local.length > 1 ? `${local[0]}***` : '***'
+      return `${maskedLocal}@${domain}`
+    }
+
+    if (redacted.adminEmail) {
+      redacted.adminEmail = maskEmail(redacted.adminEmail)
+    }
+    if (redacted.targetUserEmail) {
+      redacted.targetUserEmail = maskEmail(redacted.targetUserEmail)
+    }
+
+    // Mask IP address: mask last octet if IPv4
+    if (redacted.ipAddress) {
+      const parts = redacted.ipAddress.split('.')
+      if (parts.length === 4) {
+        parts[3] = '***'
+        redacted.ipAddress = parts.join('.')
+      }
+    }
+
+    return redacted
   }
 }
 
+function createRepository(): AuditLogRepository {
+  const shouldUsePostgres = process.env.AUDIT_LOG_BACKEND === 'postgres'
+  if (!shouldUsePostgres) {
+    return new InMemoryAuditLogsRepository()
+  }
+
+  return new PostgresAuditLogsRepository(pool)
+}
+
 // Create a singleton instance
-export const auditLogService = new AuditLogService()
+export const auditLogService = new AuditLogService(createRepository())
 
 // Export types
-export { AuditLogEntry, AuditAction } from './types.js'
+export { AuditAction } from './types.js'
+export type { AuditLogEntry, AuditLogInput, AuditLogFilters } from './types.js'

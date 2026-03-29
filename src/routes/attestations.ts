@@ -1,22 +1,18 @@
 /**
  * @module routes/attestations
- * @description Express routes for the Credence attestation public API.
- *
- * | Method | Path                                    | Description                         |
- * |--------|-----------------------------------------|-------------------------------------|
- * | GET    | `/api/attestations/:identity/count`     | Attestation count for an identity   |
- * | GET    | `/api/attestations/:identity`           | Paginated attestation list          |
- * | POST   | `/api/attestations`                     | Create a new attestation            |
- * | DELETE | `/api/attestations/:id`                 | Revoke an attestation               |
  */
 
 import { Router, type Request, type Response } from 'express';
-
+import {
+  buildPaginationMeta,
+  parsePaginationParams,
+} from '../lib/pagination.js';
 import { AttestationRepository } from '../repositories/attestationRepository.js';
 import type {
   AttestationCountResponse,
   AttestationListResponse,
 } from '../types/attestation.js';
+import { AppError, ErrorCode, ValidationError, NotFoundError } from '../lib/errors.js';
 
 /**
  * Create and return an Express {@link Router} wired to the given
@@ -29,13 +25,6 @@ export function createAttestationRouter(repo: AttestationRepository): Router {
   const router = Router();
 
   // ── GET /api/attestations/:identity/count ────────────────────────────
-
-  /**
-   * Return the attestation count for a given identity.
-   *
-   * Query params:
-   * - `includeRevoked` (`true`/`false`, default `false`)
-   */
   router.get('/:identity/count', (req: Request, res: Response): void => {
     const { identity } = req.params;
     const includeRevoked = req.query.includeRevoked === 'true';
@@ -52,53 +41,52 @@ export function createAttestationRouter(repo: AttestationRepository): Router {
   });
 
   // ── GET /api/attestations/:identity ──────────────────────────────────
-
-  /**
-   * Return a paginated list of attestations for an identity.
-   *
-   * Query params:
-   * - `page`           (number, default 1)
-   * - `limit`          (number, default 20, max 100)
-   * - `includeRevoked` (`true`/`false`, default `false`)
-   *
-   * Each attestation in the response includes `verifier` and `weight`.
-   * Revoked attestations are excluded by default; set `includeRevoked=true`
-   * to include them (they will have a non-null `revokedAt` field).
-   */
-  router.get('/:identity', (req: Request, res: Response): void => {
+  router.get('/:identity', (req: Request, res: Response, next): void => {
     const { identity } = req.params;
-    const page = Math.max(1, Number(req.query.page) || 1);
-    const limit = Math.max(1, Math.min(100, Number(req.query.limit) || 20));
     const includeRevoked = req.query.includeRevoked === 'true';
+
+    try {
+      const { page, limit, offset } = parsePaginationParams(req.query as Record<string, unknown>);
+
+      // Note: check the repo interface in repositories/attestationRepository.ts if needed
+      const { attestations, total } = repo.findBySubject(identity, {
+        includeRevoked,
+        offset, // Using offset instead of page if that's what's expected
+        limit,
+      });
+      const paginationMeta = buildPaginationMeta(total, page, limit);
+
+      const body: AttestationListResponse = {
+        identity,
+        attestations,
+        ...paginationMeta,
+      };
+
+      res.json(body);
+    } catch (error) {
+      next(error);
+    }
+
+    const { page, limit, offset } = pagination;
 
     const { attestations, total } = repo.findBySubject(identity, {
       includeRevoked,
-      page,
+      offset,
       limit,
     });
-
-    const totalPages = Math.max(1, Math.ceil(total / limit));
+    const paginationMeta = buildPaginationMeta(total, page, limit);
 
     const body: AttestationListResponse = {
       identity,
       attestations,
-      page,
-      limit,
-      total,
-      totalPages,
+      ...paginationMeta,
     };
 
     res.json(body);
   });
 
   // ── POST /api/attestations ───────────────────────────────────────────
-
-  /**
-   * Create a new attestation.
-   *
-   * Body: `{ subject, verifier, weight, claim }`
-   */
-  router.post('/', (req: Request, res: Response): void => {
+  router.post('/', (req: Request, res: Response, next): void => {
     try {
       const { subject, verifier, weight, claim } = req.body as {
         subject: string;
@@ -110,27 +98,20 @@ export function createAttestationRouter(repo: AttestationRepository): Router {
       const attestation = repo.create({ subject, verifier, weight, claim });
       res.status(201).json(attestation);
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Unknown error';
-      res.status(400).json({ error: message });
+      next(err);
     }
   });
 
   // ── DELETE /api/attestations/:id ─────────────────────────────────────
-
-  /**
-   * Revoke an attestation by its ID.
-   */
-  router.delete('/:id', (req: Request, res: Response): void => {
+  router.delete('/:id', (req: Request, res: Response, next): void => {
     try {
       const result = repo.revoke(req.params.id);
       if (!result) {
-        res.status(404).json({ error: 'Attestation not found' });
-        return;
+        throw new NotFoundError('Attestation', req.params.id);
       }
       res.json(result);
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Unknown error';
-      res.status(409).json({ error: message });
+      next(err);
     }
   });
 
