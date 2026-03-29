@@ -120,6 +120,24 @@ export const staleCacheReadsTotal = new client.Counter({
 })
 
 // ============================================================================
+// Idempotency Metrics
+// ============================================================================
+
+export const idempotencyGuardChecks = new client.Counter({
+  name: 'idempotency_guard_checks_total',
+  help: 'Total number of idempotency guard checks',
+  labelNames: ['handler_type', 'result'],
+  registers: [register]
+})
+
+export const idempotencyDuplicatesDetected = new client.Counter({
+  name: 'idempotency_duplicates_detected_total',
+  help: 'Total number of duplicate messages detected',
+  labelNames: ['handler_type'],
+  registers: [register]
+})
+
+// ============================================================================
 // Middleware
 // ============================================================================
 
