@@ -252,7 +252,7 @@ export function createAdminRouter(): Router {
         throw new ValidationError('startDate must be before or equal to endDate')
       }
 
-      const stream = adminService.exportAuditLogs(user.id, user.email, startDate, endDate)
+      const stream = adminService.exportAuditLogs(user.id, user.email, startDate, endDate, user)
 
       // Set headers for NDJSON streaming
       res.setHeader('Content-Type', 'application/x-ndjson')

@@ -1,4 +1,5 @@
 import { MOCK_USERS, API_KEY_TO_USER, UserRole } from '../../middleware/auth.js'
+import type { AuthenticatedRequest } from '../../middleware/auth.js'
 import { AuditLogService, AuditAction } from '../audit/index.js'
 import type {
   AdminUser,
@@ -39,6 +40,8 @@ export class AdminService {
     const page = pagination.page ?? 1
     const limit = pagination.limit ?? 50
     const offset = pagination.offset ?? 0
+
+    const tenantId = MOCK_USERS[adminId]?.tenantId || 'tenant-admin'
 
     // Log the list action
     void this.auditLog.logAction({
@@ -91,6 +94,8 @@ export class AdminService {
     request: AssignRoleRequest
   ): Promise<AssignRoleResponse> {
     const { userId, role } = request
+
+    const tenantId = MOCK_USERS[adminId]?.tenantId || 'tenant-admin'
 
     // Validate role
     const validRoles = Object.values(UserRole)
@@ -160,6 +165,8 @@ export class AdminService {
   ): Promise<RevokeApiKeyResponse> {
     const { userId, apiKey } = request
 
+    const tenantId = MOCK_USERS[adminId]?.tenantId || 'tenant-admin'
+
     const user = MOCK_USERS[userId]
     if (!user) {
       void this.auditLog.logAction({
@@ -228,9 +235,10 @@ export class AdminService {
   getAuditLogs(
     adminId: string,
     adminEmail: string,
-    filters?: any,
-    limit?: number,
-    offset?: number
+    filters: any,
+    limit: number,
+    offset: number,
+    user: AuthenticatedRequest['user']
   ) {
     return this.auditLog.getLogs(
       {
@@ -256,8 +264,11 @@ export class AdminService {
     adminId: string,
     adminEmail: string,
     startDate: Date,
-    endDate: Date
+    endDate: Date,
+    user: AuthenticatedRequest['user']
   ) {
+    const tenantId = user?.tenantId || 'tenant-admin'
+
     // Log the initiation of the export
     void this.auditLog.logAction({
       actorId: adminId,
@@ -268,7 +279,12 @@ export class AdminService {
       details: { startDate: startDate.toISOString(), endDate: endDate.toISOString(), phase: 'initiation' },
     })
 
-    return this.auditLog.exportLogsStream(startDate, endDate)
+    const options: { allowSuperScope?: boolean } = {}
+    if (user?.role === UserRole.SUPER_ADMIN) {
+      options.allowSuperScope = true
+    }
+
+    return this.auditLog.exportLogsStream(startDate, endDate, tenantId, options)
   }
 
   /**
@@ -320,3 +336,4 @@ export class AdminService {
     return `api_${timestamp}_${random}`
   }
 }
+
