@@ -6,6 +6,7 @@ import trustRouter from './routes/trust.js'
 import bulkRouter from './routes/bulk.js'
 import importsRouter from './routes/imports.js'
 import { createAdminRouter } from './routes/admin/index.js'
+import { createWebhookAdminRouter } from './routes/admin/webhooks.js'
 import { createPolicyRouter } from './routes/policy.js'
 import { createAnalyticsRouter } from './routes/analytics.js'
 import { AnalyticsService } from './services/analytics/service.js'
@@ -23,7 +24,9 @@ import {
 } from './schemas/index.js'
 import { compressionMiddleware, compressionMetricsMiddleware } from './middleware/compression.js'
 import { metricsMiddleware, register } from './middleware/metrics.js'
-import { createMembersRouter } from './routes/admin/member.ts'
+import { createMembersRouter } from './routes/admin/member.js'
+import { createApiKeyRouter } from './routes/apiKeys.js'
+import { errorHandler } from './middleware/errorHandler.js'
 
 const app = express()
 
@@ -110,6 +113,9 @@ app.use('/api/imports', importsRouter)
 // Admin API
 app.use('/api/admin', createAdminRouter())
 app.use('/api/admin/webhooks', createWebhookAdminRouter())
+
+// Integration API key management (create, list, rotate, revoke)
+app.use('/api/integrations/keys', createApiKeyRouter())
 
 // Policy engine – fine-grained org permissions
 app.use('/api/orgs/:orgId/policies', createPolicyRouter())
