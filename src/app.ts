@@ -23,7 +23,8 @@ import {
 } from './schemas/index.js'
 import { compressionMiddleware, compressionMetricsMiddleware } from './middleware/compression.js'
 import { metricsMiddleware, register } from './middleware/metrics.js'
-import { createMembersRouter } from './routes/admin/member.ts'
+import { createWebhookAdminRouter } from './routes/admin/webhooks.js'
+import { errorHandler } from './middleware/errorHandler.js'
 
 const app = express()
 
