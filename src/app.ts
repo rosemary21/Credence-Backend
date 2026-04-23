@@ -6,12 +6,15 @@ import trustRouter from './routes/trust.js'
 import bulkRouter from './routes/bulk.js'
 import importsRouter from './routes/imports.js'
 import { createAdminRouter } from './routes/admin/index.js'
+import { createWebhookAdminRouter } from './routes/admin/webhooks.js'
 import { createPolicyRouter } from './routes/policy.js'
 import { createAnalyticsRouter } from './routes/analytics.js'
+import { createTransactionsRouter } from './routes/transactions.js'
 import { AnalyticsService } from './services/analytics/service.js'
 import { pool } from './db/pool.js'
 import { validate } from './middleware/validate.js'
 import { requestIdMiddleware } from './middleware/requestId.js'
+import { errorHandler } from './middleware/errorHandler.js'
 import {
   buildPaginationMeta,
   parsePaginationParams,
@@ -119,6 +122,9 @@ const analyticsService = process.env.DATABASE_URL
   ? new AnalyticsService(pool, analyticsThresholdSeconds)
   : undefined
 app.use('/api/analytics', createAnalyticsRouter(analyticsService))
+
+// Transactions
+app.use('/api/transactions', createTransactionsRouter())
 
 // Final error handler
 app.use(errorHandler)

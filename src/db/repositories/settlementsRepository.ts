@@ -156,4 +156,37 @@ export class SettlementsRepository {
 
     return (result.rowCount ?? 0) > 0
   }
+
+  async findManyPaginated(params: {
+    limit: number
+    cursor?: { t: string; i: string }
+    bondId?: string
+  }): Promise<Settlement[]> {
+    const { limit, cursor, bondId } = params
+    const values: any[] = [limit]
+    let whereClause = ''
+    let paramIndex = 2
+
+    if (bondId) {
+      whereClause = `WHERE bond_id = $${paramIndex++}`
+      values.push(bondId)
+    }
+
+    if (cursor) {
+      const prefix = whereClause ? 'AND' : 'WHERE'
+      whereClause += ` ${prefix} (settled_at, id) < ($${paramIndex}, $${paramIndex + 1})`
+      values.push(cursor.t, cursor.i)
+    }
+
+    const query = `
+      SELECT id, bond_id, amount, transaction_hash, settled_at, status, created_at, updated_at
+      FROM settlements
+      ${whereClause}
+      ORDER BY settled_at DESC, id DESC
+      LIMIT $1
+    `
+
+    const result = await this.db.query<SettlementRow>(query, values)
+    return result.rows.map(mapSettlement)
+  }
 }
