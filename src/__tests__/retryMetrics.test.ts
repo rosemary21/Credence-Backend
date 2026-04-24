@@ -225,3 +225,90 @@ describe('createPrometheusRetryObserver', () => {
     assert.strictEqual(a, b)
   })
 })
+
+// ---------------------------------------------------------------------------
+// deliverWebhook observer integration
+// ---------------------------------------------------------------------------
+
+import { deliverWebhook } from '../services/webhooks/delivery.js'
+import type { WebhookConfig, WebhookPayload } from '../services/webhooks/types.js'
+
+const webhookConfig: WebhookConfig = {
+  id: 'wh-1',
+  url: 'https://example.com/hook',
+  secret: 'supersecretkey1234567890',
+  secretUpdatedAt: new Date(),
+  events: ['bond.created'],
+  active: true,
+}
+
+const webhookPayload: WebhookPayload = {
+  event: 'bond.created',
+  data: { address: 'GABC', bondedAmount: '100', bondStart: null, bondDuration: null, active: true },
+  timestamp: new Date().toISOString(),
+}
+
+describe('deliverWebhook retry observer', () => {
+  it('fires onSuccess on first successful delivery', async () => {
+    const { observer, successes } = makeSpyObserver()
+
+    await deliverWebhook(webhookConfig, webhookPayload, {
+      fetchFn: async () => new Response('ok', { status: 200 }),
+      retryObserver: observer,
+    })
+
+    assert.equal(successes.length, 1)
+    assert.equal(successes[0]?.provider, 'webhook')
+    assert.equal(successes[0]?.attempt, 1)
+  })
+
+  it('fires onRetryAttempt for each 5xx before success', async () => {
+    const { observer, attempts, successes } = makeSpyObserver()
+    let call = 0
+
+    await deliverWebhook(webhookConfig, webhookPayload, {
+      fetchFn: async () => {
+        call += 1
+        if (call < 3) return new Response('error', { status: 503 })
+        return new Response('ok', { status: 200 })
+      },
+      sleepFn: async () => {},
+      retryObserver: observer,
+    })
+
+    assert.equal(attempts.length, 2)
+    assert.equal(attempts[0]?.provider, 'webhook')
+    assert.equal(attempts[0]?.errorCode, 'HTTP_503')
+    assert.equal(successes.length, 1)
+    assert.equal(successes[0]?.attempt, 3)
+  })
+
+  it('fires onRetryExhausted immediately for 4xx (no retry)', async () => {
+    const { observer, attempts, exhausted } = makeSpyObserver()
+
+    await deliverWebhook(webhookConfig, webhookPayload, {
+      fetchFn: async () => new Response('forbidden', { status: 403 }),
+      retryObserver: observer,
+    })
+
+    assert.equal(attempts.length, 0)
+    assert.equal(exhausted.length, 1)
+    assert.equal(exhausted[0]?.errorCode, 'HTTP_403')
+    assert.equal(exhausted[0]?.attempts, 1)
+  })
+
+  it('fires onRetryExhausted when all 5xx attempts fail', async () => {
+    const { observer, exhausted } = makeSpyObserver()
+
+    await deliverWebhook(webhookConfig, webhookPayload, {
+      retryPolicy: { maxAttempts: 2 },
+      fetchFn: async () => new Response('error', { status: 503 }),
+      sleepFn: async () => {},
+      retryObserver: observer,
+    })
+
+    assert.equal(exhausted.length, 1)
+    assert.equal(exhausted[0]?.provider, 'webhook')
+    assert.equal(exhausted[0]?.attempts, 2)
+  })
+})
