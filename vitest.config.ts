@@ -31,4 +31,7 @@ export default defineConfig({
       },
     },
   },
+  resolve: {
+    extensions: ['.ts', '.js', '.json'],
+  },
 })

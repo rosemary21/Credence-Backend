@@ -23,6 +23,7 @@ import {
 } from './schemas/index.js'
 import { compressionMiddleware, compressionMetricsMiddleware } from './middleware/compression.js'
 import { metricsMiddleware, register } from './middleware/metrics.js'
+import { latencyMetricsMiddleware } from './middleware/latencyMetrics.js'
 import { createMembersRouter } from './routes/admin/member.ts'
 
 const app = express()
@@ -37,6 +38,7 @@ app.get('/metrics', async (_req, res) => {
 })
 
 app.use(metricsMiddleware)
+app.use(latencyMetricsMiddleware)
 app.use(compressionMetricsMiddleware)
 app.use(compressionMiddleware)
 app.use(express.json())
