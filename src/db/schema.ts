@@ -1,5 +1,5 @@
-import type { Queryable } from './repositories/queryable.js'
-import { OUTBOX_TABLE_SCHEMA, OUTBOX_INDEXES } from './outbox/schema.js'
+import type { Queryable } from "./repositories/queryable.js";
+import { OUTBOX_TABLE_SCHEMA, OUTBOX_INDEXES } from "./outbox/schema.js";
 
 const CREATE_TABLE_STATEMENTS = [
   `
@@ -9,6 +9,16 @@ const CREATE_TABLE_STATEMENTS = [
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT identities_address_nonempty CHECK (length(trim(address)) > 0)
+  )
+  `,
+  `
+  CREATE TABLE IF NOT EXISTS wallets (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    address TEXT NOT NULL UNIQUE,
+    balance NUMERIC(36, 18) NOT NULL DEFAULT 0 CHECK (balance >= 0),
+    currency TEXT NOT NULL DEFAULT 'USD',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   )
   `,
   `
@@ -111,33 +121,34 @@ const CREATE_TABLE_STATEMENTS = [
   `CREATE INDEX IF NOT EXISTS audit_logs_actor_time_idx ON audit_logs (actor_id, occurred_at DESC)`,
   `CREATE INDEX IF NOT EXISTS audit_logs_resource_time_idx ON audit_logs (resource_id, occurred_at DESC)`,
   `CREATE INDEX IF NOT EXISTS audit_logs_time_idx ON audit_logs (occurred_at DESC)`,
-] as const
+] as const;
 
 const DROP_TABLE_STATEMENTS = [
-  'DROP TABLE IF EXISTS event_outbox',
-  'DROP TABLE IF EXISTS report_jobs',
-  'DROP TABLE IF EXISTS score_history',
-  'DROP TABLE IF EXISTS audit_logs',
-  'DROP TABLE IF EXISTS slash_events',
-  'DROP TABLE IF EXISTS attestations',
-  'DROP TABLE IF EXISTS bonds',
-  'DROP TABLE IF EXISTS identities',
-] as const
+  "DROP TABLE IF EXISTS event_outbox",
+  "DROP TABLE IF EXISTS report_jobs",
+  "DROP TABLE IF EXISTS score_history",
+  "DROP TABLE IF EXISTS audit_logs",
+  "DROP TABLE IF EXISTS slash_events",
+  "DROP TABLE IF EXISTS attestations",
+  "DROP TABLE IF EXISTS bonds",
+  "DROP TABLE IF EXISTS wallets",
+  "DROP TABLE IF EXISTS identities",
+] as const;
 
 export async function createSchema(db: Queryable): Promise<void> {
   for (const statement of CREATE_TABLE_STATEMENTS) {
-    await db.query(statement)
+    await db.query(statement);
   }
 }
 
 export async function resetDatabase(db: Queryable): Promise<void> {
   await db.query(
-    'TRUNCATE TABLE report_jobs, audit_logs, score_history, slash_events, attestations, bonds, identities RESTART IDENTITY CASCADE'
-  )
+    "TRUNCATE TABLE report_jobs, audit_logs, score_history, slash_events, attestations, bonds, wallets, identities RESTART IDENTITY CASCADE",
+  );
 }
 
 export async function dropSchema(db: Queryable): Promise<void> {
   for (const statement of DROP_TABLE_STATEMENTS) {
-    await db.query(statement)
+    await db.query(statement);
   }
 }
