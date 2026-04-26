@@ -23,21 +23,21 @@ import { pool } from '../../db/pool.js'
 export function createAdminRouter(): Router {
   const router = Router()
   const adminService = new AdminService(auditLogService)
-  
+
   // Replay Service Setup
   const replayRepo = new FailedInboundEventsRepository(pool)
   const replayService = new ReplayService(replayRepo)
-  
+
   const identityRepo = new IdentityRepository(pool)
   const bondsRepo = new BondsRepository(pool)
-  
+
   // Register handlers
   registerAllReplayHandlers(replayService, identityRepo, bondsRepo)
 
   /**
    * GET /api/admin/users
    */
-  router.get('/users', requireUserAuth, requireAdminRole, async (req: Request, res: Response) => {
+  router.get('/users', requireUserAuth, requireAdminRole, async (req: Request, res: Response, next) => {
     try {
       const authReq = req as AuthenticatedRequest
       const user = authReq.user!
@@ -75,7 +75,7 @@ export function createAdminRouter(): Router {
   /**
    * POST /api/admin/roles/assign
    */
-  router.post('/roles/assign', requireUserAuth, requireAdminRole, async (req: Request, res: Response) => {
+  router.post('/roles/assign', requireUserAuth, requireAdminRole, async (req: Request, res: Response, next) => {
     try {
       const authReq = req as AuthenticatedRequest
       const user = authReq.user!
@@ -101,7 +101,7 @@ export function createAdminRouter(): Router {
   /**
    * POST /api/admin/keys/revoke
    */
-  router.post('/keys/revoke', requireUserAuth, requireAdminRole, async (req: Request, res: Response) => {
+  router.post('/keys/revoke', requireUserAuth, requireAdminRole, async (req: Request, res: Response, next) => {
     try {
       const authReq = req as AuthenticatedRequest
       const user = authReq.user!
@@ -128,7 +128,7 @@ export function createAdminRouter(): Router {
    *
    * Issue a short-lived impersonation token for support/debug purposes.
    */
-  router.post('/impersonate', requireUserAuth, requireAdminRole, (req: Request, res: Response) => {
+  router.post('/impersonate', requireUserAuth, requireAdminRole, (req: Request, res: Response, next) => {
     try {
       const authReq = req as AuthenticatedRequest
       const user = authReq.user!
@@ -170,7 +170,7 @@ export function createAdminRouter(): Router {
    *
    * Revoke an active impersonation token.
    */
-  router.post('/impersonate/:tokenId/revoke', requireUserAuth, requireAdminRole, (req: Request, res: Response) => {
+  router.post('/impersonate/:tokenId/revoke', requireUserAuth, requireAdminRole, (req: Request, res: Response, next) => {
     const authReq = req as AuthenticatedRequest
     const user = authReq.user!
     const { tokenId } = req.params
@@ -196,7 +196,7 @@ export function createAdminRouter(): Router {
   /**
    * GET /api/admin/audit-logs
    */
-  router.get('/audit-logs', requireUserAuth, requireAdminRole, async (req: Request, res: Response) => {
+  router.get('/audit-logs', requireUserAuth, requireAdminRole, async (req: Request, res: Response, next) => {
     try {
       const authReq = req as AuthenticatedRequest
       const user = authReq.user!
@@ -247,7 +247,7 @@ export function createAdminRouter(): Router {
       if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
         throw new ValidationError('Invalid date format. Use ISO strings.')
       }
-      
+
       if (startDate > endDate) {
         throw new ValidationError('startDate must be before or equal to endDate')
       }
@@ -257,7 +257,7 @@ export function createAdminRouter(): Router {
       // Set headers for NDJSON streaming
       res.setHeader('Content-Type', 'application/x-ndjson')
       res.setHeader('Content-Disposition', 'attachment; filename="audit-logs.ndjson"')
-      
+
       const metadata = {
         _meta: {
           exportedAt: new Date().toISOString(),
@@ -287,35 +287,35 @@ export function createAdminRouter(): Router {
 
   /**
    * GET /api/admin/events/failed
-   * 
+   *
    * List failed inbound events for review
    */
-  router.get('/events/failed', requireUserAuth, requireAdminRole, async (req: Request, res: Response) => {
+  router.get('/events/failed', requireUserAuth, requireAdminRole, async (req: Request, res: Response, next) => {
     try {
+      const { page, limit, offset } = parsePaginationParams(req.query as Record<string, unknown>)
       const filters: any = {}
       if (req.query.status) filters.status = req.query.status
       if (req.query.type) filters.type = req.query.type
 
-      const limit = parseInt(req.query.limit as string) || 50
-      const offset = parseInt(req.query.offset as string) || 0
+      const { events, total } = await replayService.listFailedEvents(filters, limit, offset)
+      const paginationMeta = buildPaginationMeta(total, page, limit)
 
-      const result = await replayService.listFailedEvents(filters, limit, offset)
-      
       res.status(200).json({
         success: true,
-        data: result
+        data: events,
+        ...paginationMeta,
       })
     } catch (error: any) {
-      res.status(500).json({ error: 'InternalError', message: error.message })
+      next(error)
     }
   })
 
   /**
    * POST /api/admin/events/replay/:id
-   * 
+   *
    * Replay a specific failed event
    */
-  router.post('/events/replay/:id', requireUserAuth, requireAdminRole, async (req: Request, res: Response) => {
+  router.post('/events/replay/:id', requireUserAuth, requireAdminRole, async (req: Request, res: Response, next) => {
     try {
       const authReq = req as AuthenticatedRequest
       const admin = authReq.user!

@@ -1,190 +1,144 @@
-import type { Pool, PoolClient } from "pg";
+import type { Pool, PoolClient } from 'pg'
+
+/** PostgreSQL error code emitted when lock_timeout fires (lock_not_available). */
+export const PG_LOCK_TIMEOUT_CODE = '55P03'
 
 /**
- * PostgreSQL error code for lock timeout.
- * @see https://www.postgresql.org/docs/current/errcodes-appendix.html
- */
-export const PG_LOCK_TIMEOUT_CODE = "55P03";
-
-/**
- * Predefined lock timeout policies for different transaction types.
+ * Named timeout policies that map to pre-configured millisecond values.
+ * Choose the least-permissive policy that still meets the operation's SLA
+ * to bound contention impact on other callers.
  */
 export enum LockTimeoutPolicy {
-  /** Short timeout for read-only queries (1s default). */
-  READONLY = "readonly",
-  /** Standard timeout for most operations (2s default). */
-  DEFAULT = "default",
-  /** Extended timeout for critical operations (10s default). */
-  CRITICAL = "critical",
+  READONLY = 'readonly',
+  DEFAULT = 'default',
+  CRITICAL = 'critical',
 }
 
-/**
- * Thrown when a transaction cannot acquire a lock within the configured timeout.
- */
+/** Thrown when a row lock cannot be acquired within the configured window. */
 export class LockTimeoutError extends Error {
   constructor(
-    message: string,
-    readonly policy: LockTimeoutPolicy | "custom",
-    readonly timeoutMs: number,
-    readonly originalError?: Error,
+    /** The named policy active at the time of the timeout, if any. */
+    public readonly policy: LockTimeoutPolicy | undefined,
+    /** Effective timeout in milliseconds that was applied. */
+    public readonly timeoutMs: number
   ) {
-    super(message);
-    this.name = "LockTimeoutError";
+    super(`Lock timeout after ${timeoutMs}ms (policy: ${policy ?? 'custom'})`)
+    this.name = 'LockTimeoutError'
   }
 }
 
-/**
- * Configuration for lock timeouts (in milliseconds).
- */
 export interface LockTimeoutConfig {
-  readonly readonly: number;
-  readonly default: number;
-  readonly critical: number;
+  readonly: number
+  default: number
+  critical: number
 }
 
-/**
- * Options for transaction execution.
- */
 export interface TransactionOptions {
-  /** Lock timeout policy to use. */
-  policy?: LockTimeoutPolicy;
-  /** Custom timeout in milliseconds (overrides policy). */
-  timeoutMs?: number;
-  /** Transaction isolation level. */
-  isolationLevel?: "READ COMMITTED" | "REPEATABLE READ" | "SERIALIZABLE";
-  /** Whether to retry on lock timeout. */
-  retryOnLockTimeout?: boolean;
-  /** Maximum number of retries (default: 0). */
-  maxRetries?: number;
-  /** Base delay between retries in milliseconds (default: 100ms). */
-  retryDelayMs?: number;
+  policy?: LockTimeoutPolicy
+  timeoutMs?: number
+  isolationLevel?: 'READ COMMITTED' | 'REPEATABLE READ' | 'SERIALIZABLE'
+  retryOnLockTimeout?: boolean
+  maxRetries?: number
+  retryDelayMs?: number
+}
+
+const FALLBACK_TIMEOUTS: LockTimeoutConfig = {
+  readonly: 2_000,
+  default: 5_000,
+  critical: 10_000,
 }
 
 /**
- * Default lock timeout configuration.
- */
-const DEFAULT_LOCK_TIMEOUTS: LockTimeoutConfig = {
-  readonly: 1000,
-  default: 2000,
-  critical: 10000,
-};
-
-/**
- * Manages database transactions with configurable lock timeouts and retry logic.
+ * Manages PostgreSQL transactions with configurable lock-timeout policies
+ * and optional exponential-backoff retry on contention.
+ *
+ * Pass the PoolClient received by the withTransaction callback to every
+ * repository that must participate in the same atomic unit. All writes share
+ * one client connection under a single BEGIN...COMMIT block. Any uncaught
+ * error triggers an immediate ROLLBACK so partial state is never committed,
+ * even across multiple nested service calls.
  */
 export class TransactionManager {
-  private readonly lockTimeouts: LockTimeoutConfig;
+  private readonly timeouts: LockTimeoutConfig
 
   constructor(
     private readonly pool: Pool,
-    lockTimeouts?: Partial<LockTimeoutConfig>,
+    timeouts?: Partial<LockTimeoutConfig>
   ) {
-    this.lockTimeouts = { ...DEFAULT_LOCK_TIMEOUTS, ...lockTimeouts };
+    this.timeouts = { ...FALLBACK_TIMEOUTS, ...timeouts }
   }
 
   /**
-   * Execute a function within a database transaction.
+   * Execute fn atomically inside a PostgreSQL transaction.
    *
-   * @param fn - Function to execute within the transaction.
-   * @param options - Transaction configuration options.
-   * @returns The result of the transaction function.
-   * @throws {LockTimeoutError} When lock cannot be acquired within timeout.
+   * Forward the supplied PoolClient to every repository participating in
+   * this transaction so nested calls share the same BEGIN...COMMIT block and
+   * roll back together on any error.
+   *
+   * @param fn      - Callback receiving an exclusive PoolClient.
+   * @param options - Timeout policy, isolation level, and retry config.
+   * @returns The value returned by fn after a successful commit.
+   * @throws {LockTimeoutError} when a row lock cannot be acquired in time.
    */
   async withTransaction<T>(
     fn: (client: PoolClient) => Promise<T>,
-    options: TransactionOptions = {},
+    options: TransactionOptions = {}
   ): Promise<T> {
     const {
-      policy = LockTimeoutPolicy.DEFAULT,
+      policy,
       timeoutMs,
       isolationLevel,
       retryOnLockTimeout = false,
-      maxRetries = 0,
+      maxRetries = 3,
       retryDelayMs = 100,
-    } = options;
+    } = options
 
-    const timeout = timeoutMs ?? this.lockTimeouts[policy];
-    const policyName = timeoutMs ? "custom" : policy;
+    const effectiveTimeoutMs =
+      timeoutMs ?? (policy !== undefined ? this.timeouts[policy] : this.timeouts.default)
 
-    let lastError: Error | undefined;
-    let attempt = 0;
+    let attempts = 0
 
-    while (attempt <= maxRetries) {
+    while (true) {
+      const client = await this.pool.connect()
+
       try {
-        return await this.executeTransaction(fn, timeout, isolationLevel);
-      } catch (error) {
-        const isLockTimeout =
-          error instanceof Error &&
-          "code" in error &&
-          error.code === PG_LOCK_TIMEOUT_CODE;
+        const beginSql = isolationLevel
+          ? `BEGIN ISOLATION LEVEL ${isolationLevel}`
+          : 'BEGIN'
 
-        if (!isLockTimeout || !retryOnLockTimeout || attempt >= maxRetries) {
-          if (isLockTimeout) {
-            throw new LockTimeoutError(
-              `Lock timeout after ${timeout}ms (policy: ${policyName}, attempt: ${attempt + 1}/${maxRetries + 1})`,
-              policyName,
-              timeout,
-              error as Error,
-            );
+        await client.query(beginSql)
+        await client.query(`SET LOCAL lock_timeout = '${effectiveTimeoutMs}ms'`)
+
+        const result = await fn(client)
+
+        await client.query('COMMIT')
+        return result
+      } catch (err: unknown) {
+        await client.query('ROLLBACK').catch(() => {
+          // Swallowed: connection may be dead, pg will recycle on release.
+        })
+
+        const pgCode = (err as { code?: string }).code
+
+        if (pgCode === PG_LOCK_TIMEOUT_CODE) {
+          if (retryOnLockTimeout && attempts < maxRetries) {
+            const delay = retryDelayMs * Math.pow(2, attempts)
+            attempts++
+            await sleep(delay)
+            continue
           }
-          throw error;
+
+          throw new LockTimeoutError(policy, effectiveTimeoutMs)
         }
 
-        lastError = error as Error;
-        attempt++;
-
-        // Exponential backoff: retryDelayMs * 2^(attempt-1)
-        const delay = retryDelayMs * Math.pow(2, attempt - 1);
-        await this.sleep(delay);
+        throw err
+      } finally {
+        client.release()
       }
     }
-
-    // Should never reach here, but TypeScript needs it
-    throw lastError ?? new Error("Transaction failed after retries");
   }
+}
 
-  /**
-   * Execute a single transaction attempt.
-   */
-  private async executeTransaction<T>(
-    fn: (client: PoolClient) => Promise<T>,
-    timeoutMs: number,
-    isolationLevel?: string,
-  ): Promise<T> {
-    const client = await this.pool.connect();
-
-    try {
-      // Set lock timeout
-      await client.query(`SET LOCAL lock_timeout = '${timeoutMs}ms'`);
-
-      // Begin transaction with optional isolation level
-      if (isolationLevel) {
-        await client.query(`BEGIN ISOLATION LEVEL ${isolationLevel}`);
-      } else {
-        await client.query("BEGIN");
-      }
-
-      // Execute transaction function
-      const result = await fn(client);
-
-      // Commit transaction
-      await client.query("COMMIT");
-
-      return result;
-    } catch (error) {
-      // Rollback on error
-      await client.query("ROLLBACK");
-      throw error;
-    } finally {
-      // Always release client back to pool
-      client.release();
-    }
-  }
-
-  /**
-   * Sleep for the specified number of milliseconds.
-   */
-  private sleep(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-  }
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }
