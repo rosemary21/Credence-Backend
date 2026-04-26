@@ -1,5 +1,5 @@
-import type { Queryable } from './repositories/queryable.js'
-import { OUTBOX_TABLE_SCHEMA, OUTBOX_INDEXES } from './outbox/schema.js'
+import type { Queryable } from "./repositories/queryable.js";
+import { OUTBOX_TABLE_SCHEMA, OUTBOX_INDEXES } from "./outbox/schema.js";
 
 const CREATE_TABLE_STATEMENTS = [
   `
@@ -11,6 +11,16 @@ const CREATE_TABLE_STATEMENTS = [
     version INTEGER NOT NULL DEFAULT 1,
     CONSTRAINT identities_address_nonempty CHECK (length(trim(address)) > 0),
     CONSTRAINT identities_version_positive CHECK (version > 0)
+  )
+  `,
+  `
+  CREATE TABLE IF NOT EXISTS wallets (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    address TEXT NOT NULL UNIQUE,
+    balance NUMERIC(36, 18) NOT NULL DEFAULT 0 CHECK (balance >= 0),
+    currency TEXT NOT NULL DEFAULT 'USD',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   )
   `,
   `
@@ -168,7 +178,7 @@ const DROP_TABLE_STATEMENTS = [
 
 export async function createSchema(db: Queryable): Promise<void> {
   for (const statement of CREATE_TABLE_STATEMENTS) {
-    await db.query(statement)
+    await db.query(statement);
   }
 }
 
@@ -180,7 +190,7 @@ export async function resetDatabase(db: Queryable): Promise<void> {
 
 export async function dropSchema(db: Queryable): Promise<void> {
   for (const statement of DROP_TABLE_STATEMENTS) {
-    await db.query(statement)
+    await db.query(statement);
   }
   await db.query('DROP TABLE IF EXISTS idempotency_keys')
   await db.query('DROP TABLE IF EXISTS settlements')
