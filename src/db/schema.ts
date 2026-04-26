@@ -143,12 +143,17 @@ const CREATE_TABLE_STATEMENTS = [
   `CREATE INDEX IF NOT EXISTS audit_logs_actor_time_idx ON audit_logs (actor_id, occurred_at DESC)`,
   `CREATE INDEX IF NOT EXISTS audit_logs_resource_time_idx ON audit_logs (resource_id, occurred_at DESC)`,
   `CREATE INDEX IF NOT EXISTS audit_logs_time_idx ON audit_logs (occurred_at DESC)`,
+  `CREATE INDEX IF NOT EXISTS settlements_bond_id_idx ON settlements (bond_id)`,
+  `CREATE INDEX IF NOT EXISTS settlements_status_idx ON settlements (status)`,
+  `CREATE INDEX IF NOT EXISTS settlements_settled_at_idx ON settlements (settled_at DESC)`,
+  `CREATE INDEX IF NOT EXISTS settlements_transaction_hash_idx ON settlements (transaction_hash)`,
 ] as const
 
 const DROP_TABLE_STATEMENTS = [
   'DROP TABLE IF EXISTS idempotent_job_attempts',
   'DROP TABLE IF EXISTS notification_send_attempts',
   'DROP TABLE IF EXISTS event_outbox',
+  'DROP TABLE IF EXISTS settlements',
   'DROP TABLE IF EXISTS report_jobs',
   'DROP TABLE IF EXISTS score_history',
   'DROP TABLE IF EXISTS audit_logs',
@@ -167,7 +172,7 @@ export async function createSchema(db: Queryable): Promise<void> {
 
 export async function resetDatabase(db: Queryable): Promise<void> {
   await db.query(
-    'TRUNCATE TABLE report_jobs, audit_logs, score_history, slash_events, attestations, bonds, identities RESTART IDENTITY CASCADE'
+    'TRUNCATE TABLE settlements, report_jobs, audit_logs, score_history, slash_events, attestations, bonds, identities RESTART IDENTITY CASCADE'
   )
 }
 
