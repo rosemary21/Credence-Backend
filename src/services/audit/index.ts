@@ -17,6 +17,7 @@ export class AuditLogService {
   /**
    * Log an admin action
    * 
+   * @param tenantId - Tenant ID for multi-tenant isolation (required)
    * @param adminId - ID of the admin performing the action
    * @param adminEmail - Email of the admin
    * @param action - Type of action being performed
@@ -71,9 +72,12 @@ export class AuditLogService {
   /**
    * Get audit logs with optional filtering
    * 
+   * SECURITY: Tenant scoping is DENY-BY-DEFAULT. Either tenantId or allowSuperScope must be provided.
+   * 
    * @param filters - Optional filters for action, adminId, targetUserId, etc.
    * @param limit - Maximum number of logs to return (default: 100)
    * @param offset - Pagination offset (default: 0)
+   * @param options - Additional options for tenant scoping
    * @returns Array of matching audit log entries and total count
    */
   async getLogs(
@@ -103,16 +107,41 @@ export class AuditLogService {
    * Stream audit logs as an AsyncGenerator to avoid memory spikes
    * Applies date filtering and redacts sensitive information compliance policy
    * 
+   * SECURITY: Tenant scoping is DENY-BY-DEFAULT. Either tenantId or allowSuperScope must be provided.
+   * 
    * @param startDate - Start date (inclusive)
    * @param endDate - End date (inclusive)
+   * @param tenantId - Tenant ID for scoped export (required unless allowSuperScope is true)
+   * @param options - Additional options for tenant scoping
    */
-  async *exportLogsStream(startDate: Date, endDate: Date): AsyncGenerator<AuditLogEntry> {
+  async *exportLogsStream(
+    startDate: Date,
+    endDate: Date,
+    tenantId?: string,
+    options?: {
+      /** Allow super-admin to export across all tenants. Must be explicitly set to true. */
+      allowSuperScope?: boolean
+    }
+  ): AsyncGenerator<AuditLogEntry> {
+    // SECURITY: Enforce tenant scoping - deny by default
+    if (!tenantId && !options?.allowSuperScope) {
+      throw new Error(
+        'Tenant scoping required: either provide tenantId or explicitly enable allowSuperScope for privileged access'
+      )
+    }
+
     const startMs = startDate.getTime()
     const endMs = endDate.getTime()
 
     const logs = await this.getAllLogs()
     for (const log of logs) {
       const logTime = new Date(log.timestamp).getTime()
+      
+      // Apply tenant filter if provided (not in super-scope mode)
+      if (tenantId && log.tenantId !== tenantId) {
+        continue
+      }
+      
       if (logTime >= startMs && logTime <= endMs) {
         yield this.redactLogEntry(log)
         await new Promise((resolve) => setImmediate(resolve))
@@ -166,6 +195,5 @@ function createRepository(): AuditLogRepository {
 // Create a singleton instance
 export const auditLogService = new AuditLogService(createRepository())
 
-// Export types
 export { AuditAction } from './types.js'
 export type { AuditLogEntry, AuditLogInput, AuditLogFilters } from './types.js'
