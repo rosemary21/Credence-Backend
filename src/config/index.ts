@@ -118,59 +118,47 @@ export const envSchema = z.object({
     .default('none'),
 
   // Provider-specific outbound retry overrides
-  OUTBOUND_RETRY_SOROBAN_MAX_ATTEMPTS: z.coerce
-    .number()
-    .int()
-    .min(1)
-    .optional(),
-  OUTBOUND_RETRY_SOROBAN_BASE_DELAY_MS: z.coerce
-    .number()
-    .int()
-    .min(1)
-    .optional(),
-  OUTBOUND_RETRY_SOROBAN_MAX_DELAY_MS: z.coerce
-    .number()
-    .int()
-    .min(1)
-    .optional(),
-  OUTBOUND_RETRY_SOROBAN_BACKOFF_MULTIPLIER: z.coerce
-    .number()
-    .min(1)
-    .optional(),
-  OUTBOUND_RETRY_SOROBAN_JITTER_STRATEGY: z
-    .enum(['none', 'full', 'equal'])
-    .optional(),
+  OUTBOUND_RETRY_SOROBAN_MAX_ATTEMPTS: z.coerce.number().int().min(1).optional(),
+  OUTBOUND_RETRY_SOROBAN_BASE_DELAY_MS: z.coerce.number().int().min(1).optional(),
+  OUTBOUND_RETRY_SOROBAN_MAX_DELAY_MS: z.coerce.number().int().min(1).optional(),
+  OUTBOUND_RETRY_SOROBAN_BACKOFF_MULTIPLIER: z.coerce.number().min(1).optional(),
+  OUTBOUND_RETRY_SOROBAN_JITTER_STRATEGY: z.enum(['none', 'full', 'equal']).optional(),
 
-  OUTBOUND_RETRY_WEBHOOK_MAX_ATTEMPTS: z.coerce
-    .number()
-    .int()
-    .min(1)
-    .optional(),
-  OUTBOUND_RETRY_WEBHOOK_BASE_DELAY_MS: z.coerce
-    .number()
-    .int()
-    .min(1)
-    .optional(),
-  OUTBOUND_RETRY_WEBHOOK_MAX_DELAY_MS: z.coerce
-    .number()
-    .int()
-    .min(1)
-    .optional(),
-  OUTBOUND_RETRY_WEBHOOK_BACKOFF_MULTIPLIER: z.coerce
-    .number()
-    .min(1)
-    .optional(),
-  OUTBOUND_RETRY_WEBHOOK_JITTER_STRATEGY: z
-    .enum(['none', 'full', 'equal'])
-    .optional(),
+  OUTBOUND_RETRY_WEBHOOK_MAX_ATTEMPTS: z.coerce.number().int().min(1).optional(),
+  OUTBOUND_RETRY_WEBHOOK_BASE_DELAY_MS: z.coerce.number().int().min(1).optional(),
+  OUTBOUND_RETRY_WEBHOOK_MAX_DELAY_MS: z.coerce.number().int().min(1).optional(),
+  OUTBOUND_RETRY_WEBHOOK_BACKOFF_MULTIPLIER: z.coerce.number().min(1).optional(),
+  OUTBOUND_RETRY_WEBHOOK_JITTER_STRATEGY: z.enum(['none', 'full', 'equal']).optional(),
 
-  // Timeout overrides
-  TIMEOUT_DB_MS: z.coerce.number().int().min(1).optional(),
-  TIMEOUT_CACHE_MS: z.coerce.number().int().min(1).optional(),
-  TIMEOUT_QUEUE_MS: z.coerce.number().int().min(1).optional(),
-  TIMEOUT_HTTP_MS: z.coerce.number().int().min(1).optional(),
-  TIMEOUT_SOROBAN_MS: z.coerce.number().int().min(1).optional(),
-  TIMEOUT_WEBHOOK_MS: z.coerce.number().int().min(1).optional(),
+  // Rate limiting
+  RATE_LIMIT_ENABLED: z
+    .string()
+    .default('true')
+    .transform((val: string) => val === 'true'),
+  RATE_LIMIT_WINDOW_SEC: z
+    .string()
+    .default('60')
+    .transform(Number)
+    .pipe(z.number().int().min(1).max(3600)),
+  RATE_LIMIT_MAX_FREE: z
+    .string()
+    .default('100')
+    .transform(Number)
+    .pipe(z.number().int().min(1)),
+  RATE_LIMIT_MAX_PRO: z
+    .string()
+    .default('1000')
+    .transform(Number)
+    .pipe(z.number().int().min(1)),
+  RATE_LIMIT_MAX_ENTERPRISE: z
+    .string()
+    .default('10000')
+    .transform(Number)
+    .pipe(z.number().int().min(1)),
+  RATE_LIMIT_FAIL_OPEN: z
+    .string()
+    .default('true')
+    .transform((val: string) => val === 'true'),
 })
 
 export type Env = z.infer<typeof envSchema>
@@ -224,13 +212,13 @@ export interface Config {
       providers: Record<string, RetryPolicyOverrides | undefined>
     }
   }
-  timeouts: {
-    db?: number
-    cache?: number
-    queue?: number
-    http?: number
-    soroban?: number
-    webhook?: number
+  rateLimit: {
+    enabled: boolean
+    windowSec: number
+    maxFree: number
+    maxPro: number
+    maxEnterprise: number
+    failOpen: boolean
   }
 }
 
@@ -338,6 +326,14 @@ function mapEnvToConfig(env: Env): Config {
         defaults: defaultRetryPolicy,
         providers: providerPolicies,
       },
+    },
+    rateLimit: {
+      enabled: env.RATE_LIMIT_ENABLED,
+      windowSec: env.RATE_LIMIT_WINDOW_SEC,
+      maxFree: env.RATE_LIMIT_MAX_FREE,
+      maxPro: env.RATE_LIMIT_MAX_PRO,
+      maxEnterprise: env.RATE_LIMIT_MAX_ENTERPRISE,
+      failOpen: env.RATE_LIMIT_FAIL_OPEN,
     },
   }
 

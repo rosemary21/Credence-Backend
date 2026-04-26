@@ -4,9 +4,10 @@ import {
   type ProviderRetryPolicies,
   type RetryPolicy,
 } from '../lib/retryPolicy.js'
-import { executeSorobanOperation, createMetricsAdapter } from '../lib/timeoutExecutor.js'
+import { executeSorobanOperation, createMetricsAdapter, TimeoutExceededError } from '../lib/timeoutExecutor.js'
 import { createDefaultMetricsCollector } from '../observability/timeoutMetrics.js'
-import { normalizeTransportError, isAbortError, isNetworkError } from './httpErrors.js'
+import { normalizeTransportError, isAbortError } from './httpErrors.js'
+import { classifyTransportError } from '../utils/retryClassifier.js'
 import { logger } from '../utils/logger.js'
 import { resolveTimeout, createTimeoutConfig } from '../lib/timeouts.js'
 
@@ -321,9 +322,10 @@ export class SorobanClient {
       return error
     }
 
-    // Use shared detector so DOMException, Error, and cause-chained variants
-    // (e.g. undici's TypeError { cause: AbortError }) are all caught.
-    if (isAbortError(error)) {
+    // TimeoutExceededError is thrown by executeSorobanOperation when the
+    // AbortController fires. It wraps the original AbortError but has
+    // name='TimeoutExceededError', so isAbortError() won't catch it.
+    if (error instanceof TimeoutExceededError) {
       return new SorobanClientError({
         code: 'TIMEOUT_ERROR',
         message: `Soroban RPC request timed out after ${this.timeoutMs}ms.`,
@@ -332,11 +334,22 @@ export class SorobanClient {
       })
     }
 
-    if (isNetworkError(error)) {
-      const msg = error instanceof Error ? error.message : 'Unknown transport error'
+    // Use normalizeTransportError as the single classification path so that
+    // overlapping timeout+reset signals are resolved consistently:
+    // AbortError (or TypeError wrapping AbortError) → TIMEOUT wins over RESET.
+    const transport = normalizeTransportError(error)
+    if (transport !== null) {
+      if (transport.code === 'TIMEOUT') {
+        return new SorobanClientError({
+          code: 'TIMEOUT_ERROR',
+          message: `Soroban RPC request timed out after ${this.timeoutMs}ms.`,
+          attempts,
+          cause: error,
+        })
+      }
       return new SorobanClientError({
         code: 'NETWORK_ERROR',
-        message: `Soroban RPC transport error: ${msg}`,
+        message: `Soroban RPC transport error: ${transport.message}`,
         attempts,
         cause: error,
       })
