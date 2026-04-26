@@ -8,7 +8,9 @@ const CREATE_TABLE_STATEMENTS = [
     display_name TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    CONSTRAINT identities_address_nonempty CHECK (length(trim(address)) > 0)
+    version INTEGER NOT NULL DEFAULT 1,
+    CONSTRAINT identities_address_nonempty CHECK (length(trim(address)) > 0),
+    CONSTRAINT identities_version_positive CHECK (version > 0)
   )
   `,
   `
