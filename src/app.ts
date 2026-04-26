@@ -6,6 +6,7 @@ import trustRouter from './routes/trust.js'
 import bulkRouter from './routes/bulk.js'
 import importsRouter from './routes/imports.js'
 import { createAdminRouter } from './routes/admin/index.js'
+import { createWebhookAdminRouter } from './routes/admin/webhooks.js'
 import { createPolicyRouter } from './routes/policy.js'
 import { createAnalyticsRouter } from './routes/analytics.js'
 import { AnalyticsService } from './services/analytics/service.js'
@@ -111,6 +112,9 @@ app.use('/api/imports', importsRouter)
 // Admin API
 app.use('/api/admin', createAdminRouter())
 app.use('/api/admin/webhooks', createWebhookAdminRouter())
+
+// Integration API key management (create, list, rotate, revoke)
+app.use('/api/integrations/keys', createApiKeyRouter())
 
 // Policy engine – fine-grained org permissions
 app.use('/api/orgs/:orgId/policies', createPolicyRouter())
