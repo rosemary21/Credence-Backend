@@ -53,6 +53,7 @@ export interface SorobanClientDependencies {
   fetchFn?: typeof fetch
   sleepFn?: (ms: number) => Promise<void>
   randomFn?: () => number
+  retryObserver?: RetryObserver
 }
 
 export class SorobanClientError extends Error {
@@ -111,6 +112,7 @@ export class SorobanClient {
   private readonly fetchFn: typeof fetch
   private readonly sleepFn: (ms: number) => Promise<void>
   private readonly randomFn: () => number
+  private readonly retryObserver: RetryObserver
   private readonly metrics = createMetricsAdapter(createDefaultMetricsCollector())
 
   constructor(config: SorobanClientConfig, deps: SorobanClientDependencies = {}) {
@@ -130,6 +132,7 @@ export class SorobanClient {
     this.fetchFn = deps.fetchFn ?? fetch
     this.sleepFn = deps.sleepFn ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)))
     this.randomFn = deps.randomFn ?? Math.random
+    this.retryObserver = deps.retryObserver ?? noopRetryObserver
   }
 
   /**
@@ -196,11 +199,18 @@ export class SorobanClient {
   private async callRpc<T>(method: string, params: Record<string, unknown>): Promise<T> {
     let attempt = 0
     let lastError: SorobanClientError | null = null
+    const startMs = Date.now()
 
     while (attempt < this.retryOptions.maxAttempts) {
       attempt += 1
       try {
-        return await this.executeRpc<T>(method, params, attempt)
+        const result = await this.executeRpc<T>(method, params, attempt)
+        this.retryObserver.onSuccess?.({
+          provider: 'soroban',
+          attempt,
+          durationMs: Date.now() - startMs,
+        })
+        return result
       } catch (error) {
         const normalized = this.normalizeError(error, attempt)
         lastError = normalized
@@ -209,16 +219,35 @@ export class SorobanClient {
         const shouldRetry = hasAttemptsRemaining && this.isRetryable(normalized)
 
         if (!shouldRetry) {
+          if (!hasAttemptsRemaining || !this.isRetryable(normalized)) {
+            this.retryObserver.onRetryExhausted?.({
+              provider: 'soroban',
+              attempts: attempt,
+              errorCode: normalized.code,
+            })
+          }
           throw normalized
         }
 
         const delay = this.getDelayMs(attempt)
+        this.retryObserver.onRetryAttempt?.({
+          provider: 'soroban',
+          attempt,
+          delayMs: delay,
+          errorCode: normalized.code,
+        })
         logger.info(
           `Retrying outbound request provider=soroban attempt=${attempt + 1}/${this.retryOptions.maxAttempts} delayMs=${delay} code=${normalized.code}`,
         )
         await this.sleepFn(delay)
       }
     }
+
+    this.retryObserver.onRetryExhausted?.({
+      provider: 'soroban',
+      attempts: attempt,
+      errorCode: lastError?.code ?? 'NETWORK_ERROR',
+    })
 
     throw (
       lastError ??
