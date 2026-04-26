@@ -1,4 +1,5 @@
 import 'dotenv/config'
+import { initTracing } from './tracing/tracer.js'
 import app from './app.js'
 import { createAdminRouter } from './routes/admin/index.js'
 import governanceRouter from './routes/governance.js'
@@ -18,6 +19,8 @@ export { app }
 export default app
 
 if (process.env.NODE_ENV !== 'test') {
+  initTracing()
+
   try {
     const config = loadConfig()
 

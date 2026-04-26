@@ -24,6 +24,10 @@ export {
   type CreateAttestationBody,
 } from './attestations.js'
 export {
-  createPayoutSchema,
-  type CreatePayoutInput,
-} from './payout.js'
+  attestationEventSchema,
+  withdrawalEventSchema,
+  bondCreationEventSchema,
+  type AttestationEventPayload,
+  type WithdrawalEventPayload,
+  type BondCreationEventPayload,
+} from './queue.js'
